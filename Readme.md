@@ -640,8 +640,9 @@ def unread_counts(username):
 
 前端：
 
-![前端](.\V2.2\picture\前端.png)
+<img src=".\V2.2\picture\前端.png" alt="前端" style="zoom:25%;" />
 
 后端：
 
-![后端](.\V2.2\picture\后端.png)
+<img src=".\V2.2\picture\后端.png" alt="后端" style="zoom:25%;" />
+
