@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>联系人 - WebChat</title>
+  <style>
+    * { margin:0; padding:0; box-sizing:border-box; font-family: sans-serif; }
+    body { background:#f9f9f9; padding:10px; padding-bottom:60px; }
+    .header { text-align:center; padding:10px; font-weight:bold; }
+    .contact-item { padding:12px; background:white; margin:8px 0; border-radius:6px; cursor:pointer; }
+    .btn { position:fixed; bottom:10px; left:50%; transform:translateX(-50%); width:90%; max-width:400px; padding:12px; background:#07c160; color:white; border:none; border-radius:6px; }
+    .nav { position:fixed; bottom:60px; left:0; right:0; display:flex; justify-content:space-around; background:white; padding:10px; }
+    .nav a { text-decoration:none; color:#333; }
+    .nav a.active { color:#07c160; font-weight:bold; }
+  </style>
+</head>
+<body>
+  <div class="header">联系人</div>
+  <div id="contacts-list"></div>
+  <button class="btn" onclick="addFriend()">添加好友</button>
+
+  <div class="nav">
+    <a href="/chat/contacts" class="active">聊天</a>
+    <a href="/chat/contacts">联系人</a>
+    <a href="/chat/discover">发现</a>
+  </div>
+
+  <script>
+    const currentUser = localStorage.getItem('currentUser');
+    if (!currentUser) location.href = '/chat/login';
+
+    async function getJson(url) {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return await res.json();
+    }
+
+    async function loadContacts() {
+      try {
+        const friends = await getJson(`/chat/api/friends/${currentUser}`);
+        const list = document.getElementById('contacts-list');
+        list.innerHTML = friends.map(f => 
+          `<div class="contact-item" onclick="openChat('${f}')">${f}</div>`
+        ).join('');
+      } catch (err) {
+        list.innerHTML = '<div style="color:red;">加载失败</div>';
+      }
+    }
+
+    function openChat(friend) {
+      location.href = `/chat/chat?with=${encodeURIComponent(friend)}`;
+    }
+
+    function addFriend() {
+      const target = prompt('请输入对方用户名:');
+      if (!target || !target.trim()) return;
+
+      fetch('/chat/api/add_friend_request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sender: currentUser, target: target.trim() })
+      })
+      .then(res => res.json())
+      .then(() => alert('好友申请已发送！'))
+      .catch(() => alert('发送失败'));
+    }
+
+    loadContacts();
+  </script>
+</body>
+</html>

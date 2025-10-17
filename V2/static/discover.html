@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>发现 - WebChat</title>
+  <style>
+    * { margin:0; padding:0; box-sizing:border-box; font-family: sans-serif; }
+    body { background:#f9f9f9; padding:20px; padding-bottom:60px; }
+    .btn { width:100%; padding:14px; margin:12px 0; background:#07c160; color:white; border:none; border-radius:6px; }
+    .request-item { padding:12px; background:white; margin:8px 0; border-radius:6px; display:flex; justify-content:space-between; }
+    .nav { position:fixed; bottom:0; left:0; right:0; display:flex; justify-content:space-around; background:white; padding:10px; }
+    .nav a { text-decoration:none; color:#333; }
+    .nav a.active { color:#07c160; font-weight:bold; }
+
+    /* 账户设置样式 */
+    .account-section {
+      margin-top: 20px;
+      padding: 15px;
+      background: white;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    .username-display {
+      font-size: 16px;
+      color: #333;
+      margin-bottom: 10px;
+    }
+    .setting-btn {
+      width: 100%;
+      padding: 10px;
+      margin: 8px 0;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    .modal {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0,0,0,0.5);
+      justify-content: center;
+      align-items: center;
+      z-index: 1000;
+    }
+    .modal-content {
+      background: white;
+      padding: 20px;
+      width: 90%;
+      max-width: 400px;
+      border-radius: 8px;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+    }
+    .input-group {
+      margin-bottom: 12px;
+    }
+    .input-group input {
+      width: 100%;
+      padding: 10px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+    }
+    .modal-buttons {
+      display: flex;
+      gap: 10px;
+      margin-top: 15px;
+    }
+    .modal-buttons button {
+      flex: 1;
+      padding: 10px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    .confirm-btn { background: #07c160; color: white; }
+    .cancel-btn { background: #ccc; color: black; }
+  </style>
+</head>
+<body>
+  <!-- 添加好友 -->
+  <button class="btn" onclick="addFriend()">添加好友</button>
+  <div id="requests"></div>
+
+  <!-- 创建群聊 -->
+  <button class="btn" style="background:#2196F3;" onclick="alert('群聊功能开发中...')">创建群聊</button>
+
+  <!-- === 账户设置 === -->
+  <div class="account-section">
+    <div class="username-display">当前用户名：<span id="currentUsername"></span></div>
+    <button class="setting-btn" style="background:#2196F3;" onclick="openPasswordModal()">修改密码</button>
+    <button class="setting-btn" style="background:#FF9800;" onclick="openUsernameModal()">修改用户名</button>
+    <button class="setting-btn" style="background:#f44336;" onclick="logout()">退出登录</button>
+    <button class="setting-btn" style="background:#999;" onclick="openDeleteAccountModal()">注销账号</button>
+  </div>
+
+  <!-- === 修改密码弹窗 === -->
+  <div id="passwordModal" class="modal">
+    <div class="modal-content">
+      <h3>修改密码</h3>
+      <div class="input-group">
+        <label>旧密码：</label>
+        <input type="password" id="oldPass" placeholder="请输入旧密码" />
+      </div>
+      <div class="input-group">
+        <label>新密码：</label>
+        <input type="password" id="newPass" placeholder="请输入新密码" />
+      </div>
+      <div class="modal-buttons">
+        <button class="cancel-btn" onclick="closeModal('passwordModal')">取消</button>
+        <button class="confirm-btn" onclick="changePassword()">确认</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- === 修改用户名弹窗 === -->
+  <div id="usernameModal" class="modal">
+    <div class="modal-content">
+      <h3>修改用户名</h3>
+      <div class="input-group">
+        <label>新用户名：</label>
+        <input type="text" id="newUsername" placeholder="请输入新用户名" />
+      </div>
+      <div class="modal-buttons">
+        <button class="cancel-btn" onclick="closeModal('usernameModal')">取消</button>
+        <button class="confirm-btn" onclick="changeUsername()">确认</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- === 注销账号弹窗 === -->
+  <div id="deleteAccountModal" class="modal">
+    <div class="modal-content">
+      <h3>注销账号</h3>
+      <p style="color:#f44336; margin-bottom:12px;">此操作不可逆，请谨慎操作！</p>
+      <div class="input-group">
+        <label>请输入当前密码以确认注销：</label>
+        <input type="password" id="deletePassword" placeholder="输入密码" />
+      </div>
+      <div class="modal-buttons">
+        <button class="cancel-btn" onclick="closeModal('deleteAccountModal')">取消</button>
+        <button class="confirm-btn" style="background:#f44336;" onclick="confirmDeleteAccount()">确认注销</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 导航栏 -->
+  <div class="nav">
+    <a href="/chat/contacts">聊天</a>
+    <a href="/chat/contacts">联系人</a>
+    <a href="/chat/discover" class="active">发现</a>
+  </div>
+
+  <script>
+    const currentUser = localStorage.getItem('currentUser');
+    if (!currentUser) location.href = '/chat/login';
+
+    // ==================== 公共函数 ====================
+    async function getJson(url) {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return await res.json();
+    }
+
+    async function postJson(url, data) {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return await res.json();
+    }
+
+    function openModal(id) {
+      document.getElementById(id).style.display = 'flex';
+    }
+
+    function closeModal(id) {
+      document.getElementById(id).style.display = 'none';
+    }
+
+    // ==================== 加载好友请求 ====================
+    async function loadRequests() {
+      try {
+        const requests = await getJson(`/chat/api/friend_requests/${currentUser}`);
+        const container = document.getElementById('requests');
+        if (requests.length === 0) {
+          container.innerHTML = '<p style="color:#999;">暂无好友请求</p>';
+          return;
+        }
+        container.innerHTML = requests.map(r => `
+          <div class="request-item">
+            <span>${r.from}</span>
+            <div>
+              <button onclick="accept('${r.from}')" style="background:#4CAF50;color:white;border:none;padding:5px 10px;margin:0 5px;">接受</button>
+              <button onclick="reject('${r.from}')" style="background:#f44336;color:white;border:none;padding:5px 10px;">拒绝</button>
+            </div>
+          </div>
+        `).join('');
+      } catch (err) {
+        container.innerHTML = '<p style="color:red;">加载失败</p>';
+      }
+    }
+
+    async function accept(from) {
+      await postJson('/chat/api/accept_friend', { user: currentUser, friend: from });
+      alert('已接受');
+      loadRequests();
+    }
+
+    async function reject(from) {
+      await postJson('/chat/api/reject_friend', { user: currentUser, friend: from });
+      alert('已拒绝');
+      loadRequests();
+    }
+
+    function addFriend() {
+      const target = prompt('请输入对方用户名:');
+      if (!target || !target.trim()) return;
+      postJson('/chat/api/add_friend_request', { sender: currentUser, target: target.trim() })
+        .then(() => alert('请求已发送'))
+        .catch(() => alert('发送失败'));
+    }
+
+    // ==================== 账户设置功能 ====================
+    document.getElementById('currentUsername').textContent = currentUser;
+
+    function openPasswordModal() {
+      openModal('passwordModal');
+    }
+
+    function openUsernameModal() {
+      openModal('usernameModal');
+    }
+
+    async function changePassword() {
+      const oldPass = document.getElementById('oldPass').value;
+      const newPass = document.getElementById('newPass').value;
+
+      if (!oldPass || !newPass) {
+        alert('旧密码和新密码不能为空');
+        return;
+      }
+
+      try {
+        const res = await postJson('/chat/api/change_password', {
+          username: currentUser,
+          old_password: oldPass,
+          new_password: newPass
+        });
+
+        if (res.ok) {
+          alert('密码修改成功！');
+          closeModal('passwordModal');
+          document.getElementById('oldPass').value = '';
+          document.getElementById('newPass').value = '';
+        } else {
+          alert(res.error || '修改失败');
+        }
+      } catch (err) {
+        alert('网络错误，请重试');
+      }
+    }
+
+    async function changeUsername() {
+      const newUsername = document.getElementById('newUsername').value.trim();
+
+      if (!newUsername) {
+        alert('用户名不能为空');
+        return;
+      }
+
+      try {
+        const res = await getJson(`/chat/api/check_username_exists/${newUsername}`);
+        if (res.exists) {
+          alert('该用户名已被占用，请更换');
+          return;
+        }
+
+        const updateRes = await postJson('/chat/api/change_username', {
+          old_username: currentUser,
+          new_username: newUsername
+        });
+
+        if (updateRes.ok) {
+          localStorage.setItem('currentUser', newUsername);
+          document.getElementById('currentUsername').textContent = newUsername;
+          alert('用户名修改成功！');
+          closeModal('usernameModal');
+          document.getElementById('newUsername').value = '';
+        } else {
+          alert(updateRes.error || '修改失败');
+        }
+      } catch (err) {
+        alert('网络错误，请重试');
+      }
+    }
+
+    // 退出登录
+    function logout() {
+      if (confirm('确定要退出登录吗？')) {
+        localStorage.removeItem('currentUser');
+        location.href = '/chat/login';
+      }
+    }
+
+    // 打开注销账号弹窗
+    function openDeleteAccountModal() {
+      document.getElementById('deletePassword').value = '';
+      openModal('deleteAccountModal');
+    }
+
+    // 确认注销账号
+    async function confirmDeleteAccount() {
+      const password = document.getElementById('deletePassword').value;
+      if (!password) {
+        alert('请输入密码');
+        return;
+      }
+
+      try {
+        const res = await postJson('/chat/api/delete_account', {
+          username: currentUser,
+          password: password
+        });
+
+        if (res.ok) {
+          alert('账号已成功注销！');
+          localStorage.removeItem('currentUser');
+          closeModal('deleteAccountModal');
+          location.href = '/chat/login';
+        } else {
+          alert(res.error || '注销失败');
+          document.getElementById('deletePassword').value = '';
+        }
+      } catch (err) {
+        alert('网络错误或密码错误');
+        document.getElementById('deletePassword').value = '';
+      }
+    }
+
+    // 初始化
+    loadRequests();
+  </script>
+</body>
+</html>
