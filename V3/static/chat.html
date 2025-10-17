@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>聊天 - WebChat</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; font-family: sans-serif; }
+    body {
+      background: #e5ddd5;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      padding-bottom: 60px;
+    }
+    #header {
+      padding: 10px;
+      background: #07c160;
+      color: white;
+      text-align: center;
+    }
+    #messages {
+      flex: 1;
+      padding: 10px;
+      overflow-y: auto;
+      padding-bottom: 80px;
+    }
+    .message {
+      max-width: 70%;
+      padding: 8px 12px;
+      margin: 6px 0;
+      border-radius: 8px;
+      word-wrap: break-word;
+    }
+    .sent {
+      background: #dcf8c6;
+      margin-left: auto;
+      text-align: right;
+    }
+    .received {
+      background: white;
+    }
+    .message img, .message video {
+      max-width: 200px;
+      max-height: 300px;
+      border-radius: 8px;
+    }
+    .time-label {
+      font-size: 12px;
+      color: #999;
+      margin-top: 4px;
+      text-align: right;
+      white-space: nowrap;
+    }
+    .sent .time-label {
+      text-align: right;
+    }
+    .received .time-label {
+      text-align: left;
+    }
+    #input-area {
+      display: flex;
+      padding: 10px;
+      background: white;
+      border-top: 1px solid #ddd;
+      position: fixed;
+      bottom: 60px;
+      left: 0;
+      right: 0;
+      z-index: 10;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+    }
+    #message-input {
+      flex: 1;
+      padding: 10px;
+      border: 1px solid #ccc;
+      border-radius: 20px;
+    }
+    #send-btn {
+      padding: 10px 20px;
+      margin-left: 10px;
+      background: #07c160;
+      color: white;
+      border: none;
+      border-radius: 20px;
+    }
+    #upload-btn {
+      background: #ccc;
+      border: none;
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-left: 8px;
+      cursor: pointer;
+      font-size: 18px;
+    }
+    #file-input {
+      display: none;
+    }
+    .nav {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      display: flex;
+      justify-content: space-around;
+      background: white;
+      padding: 10px;
+      border-top: 1px solid #ddd;
+      height: 60px;
+      box-shadow: 0 -2px 5px rgba(0,0,0,0.1);
+    }
+    .nav a {
+      text-decoration: none;
+      color: #333;
+    }
+  </style>
+</head>
+<body>
+  <div id="header">与 <span id="friend-name">—</span> 聊天</div>
+  <div id="messages"></div>
+
+  <div id="input-area">
+    <input id="message-input" placeholder="输入消息..." />
+    <label for="file-input" id="upload-btn">📎</label>
+    <input type="file" id="file-input" accept="image/*,video/*" />
+    <button id="send-btn" onclick="sendMessage()">发送</button>
+  </div>
+
+  <div class="nav">
+    <a href="/chat/contacts">聊天</a>
+    <a href="/chat/contacts">联系人</a>
+    <a href="/chat/discover">发现</a>
+  </div>
+
+  <script>
+    const currentUser = localStorage.getItem('currentUser');
+    if (!currentUser) location.href = '/chat/login';
+
+    const urlParams = new URLSearchParams(window.location.search);
+    const friend = urlParams.get('with');
+    if (!friend) location.href = '/chat/contacts';
+
+    document.getElementById('friend-name').textContent = friend;
+
+    async function getJson(url) {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return await res.json();
+    }
+
+    async function postJson(url, data) {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return await res.json();
+    }
+
+    // ✅ 修复：支持时间戳（数字）和字符串时间格式
+    function formatTime(timestamp) {
+        let date;
+        
+        if (typeof timestamp === 'string') {
+            const parsedDate = new Date(timestamp);
+            if (isNaN(parsedDate.getTime())) {
+                console.warn('无法解析时间字符串:', timestamp);
+                return '未知时间';
+            }
+            date = parsedDate;
+        } 
+        else if (typeof timestamp === 'number') {
+            const isMilliseconds = timestamp > 10000000000;
+            const seconds = isMilliseconds ? timestamp / 1000 : timestamp;
+            date = new Date(seconds * 1000);
+            if (isNaN(date.getTime())) {
+                console.warn('Date 创建失败:', seconds);
+                return '未知时间';
+            }
+        } 
+        else {
+            console.warn('无效的时间类型:', typeof timestamp);
+            return '未知时间';
+        }
+
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        const hours = String(date.getHours()).padStart(2, '0');
+        const minutes = String(date.getMinutes()).padStart(2, '0');
+
+        return `${year}-${month}-${day} ${hours}:${minutes}`;
+    }
+
+    function renderMessage(msg) {
+      const div = document.createElement('div');
+      div.className = 'message ' + (msg.sender === currentUser ? 'sent' : 'received');
+
+      let content = null;
+
+      if (typeof msg.text === 'object' && msg.text.type === 'file') {
+        const url = msg.text.url;
+        if (url.startsWith('data:image/')) {
+          const img = document.createElement('img');
+          img.src = url;
+          content = img;
+        } else if (url.startsWith('data:video/')) {
+          const video = document.createElement('video');
+          video.src = url;
+          video.controls = true;
+          content = video;
+        } else if (url.startsWith('/chat/uploads/')) {
+          if (msg.text.mimetype?.startsWith('image/')) {
+            const img = document.createElement('img');
+            img.src = url;
+            content = img;
+          } else if (msg.text.mimetype?.startsWith('video/')) {
+            const video = document.createElement('video');
+            video.src = url;
+            video.controls = true;
+            content = video;
+          } else {
+            content = document.createTextNode('[文件]');
+          }
+        }
+      } else {
+        content = document.createTextNode(msg.text || '[未知消息]');
+      }
+
+      div.appendChild(content);
+
+      const timeLabel = document.createElement('div');
+      timeLabel.className = 'time-label';
+      timeLabel.textContent = formatTime(msg.time);
+      div.appendChild(timeLabel);
+
+      return div;
+    }
+
+    async function loadMessages() {
+      try {
+        const msgs = await getJson(`/chat/api/messages/${currentUser}/${friend}`);
+        const container = document.getElementById('messages');
+        container.innerHTML = '';
+        msgs.forEach(msg => {
+          container.appendChild(renderMessage(msg));
+        });
+        container.scrollTop = container.scrollHeight;
+      } catch (err) {
+        console.error('加载消息失败:', err);
+      }
+    }
+
+    async function sendMessage() {
+      const input = document.getElementById('message-input');
+      const text = input.value.trim();
+      if (!text) return;
+
+      try {
+        await postJson('/chat/api/send_message', { from: currentUser, to: friend, text });
+        input.value = '';
+        loadMessages();
+      } catch (err) {
+        alert('发送失败');
+      }
+    }
+
+    document.getElementById('file-input').addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      const maxSize = 20 * 1024 * 1024;
+      if (file.size > maxSize) {
+        alert('文件不能超过 20MB');
+        return;
+      }
+
+      const allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'video/mp4', 'video/quicktime'];
+      if (!allowedTypes.includes(file.type)) {
+        alert('仅支持 JPG/PNG/GIF/MP4/MOV');
+        return;
+      }
+
+      const formData = new FormData();
+      formData.append('file', file);
+
+      try {
+        const res = await fetch('/chat/api/send_file', {
+          method: 'POST',
+          body: formData
+        });
+        if (!res.ok) throw new Error('上传失败');
+
+        const result = await res.json();
+        await postJson('/chat/api/send_message', {
+          from: currentUser,
+          to: friend,
+          text: {
+            type: 'file',
+            url: result.url,
+            mimetype: file.type
+          }
+        });
+        loadMessages();
+      } catch (err) {
+        alert('文件发送失败: ' + err.message);
+      }
+
+      e.target.value = '';
+    });
+
+    document.getElementById('message-input').addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') sendMessage();
+    });
+
+    loadMessages();
+    setInterval(loadMessages, 3000);
+  </script>
+</body>
+</html>
+
+
+
+

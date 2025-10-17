@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>注册 - WebChat</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      background: #f9f9f9;
+    }
+    .form {
+      width: 90%;
+      max-width: 400px;
+      padding: 24px;
+      background: white;
+      border-radius: 8px;
+      box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
+    }
+    .form h2 {
+      text-align: center;
+      margin-bottom: 20px;
+      color: #333;
+    }
+    .form input {
+      width: 100%;
+      padding: 12px;
+      margin: 10px 0;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      font-size: 16px;
+    }
+    .form input:focus {
+      outline: none;
+      border-color: #07c160;
+      box-shadow: 0 0 0 2px rgba(7, 193, 96, 0.2);
+    }
+    .form button {
+      width: 100%;
+      padding: 12px;
+      background: #07c160;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 16px;
+      margin-top: 10px;
+    }
+    .form button:hover:not(:disabled) {
+      background: #06a852;
+    }
+    .form button:disabled {
+      background: #a0d9c0;
+      cursor: not-allowed;
+    }
+    .link {
+      text-align: center;
+      margin-top: 16px;
+      color: #07c160;
+      text-decoration: underline;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    .step { display: none; }
+    .active { display: block; }
+    .hint {
+      font-size: 13px;
+      color: #666;
+      margin-top: 4px;
+    }
+  </style>
+</head>
+<body>
+  <div class="form">
+    <!-- 步骤1：输入信息 -->
+    <div id="step1" class="step active">
+      <h2>注册账号</h2>
+      <input id="user" type="text" placeholder="用户名（3-16位）" autocomplete="username" />
+      <input id="pass" type="password" placeholder="密码（至少6位）" autocomplete="new-password" />
+      <input id="email" type="email" placeholder="邮箱（用于接收验证码）" />
+      <div class="hint">注册后可通过邮箱找回密码</div>
+      <button onclick="sendCode()">发送验证码</button>
+      <div class="link" onclick="location.href='/chat/login'">返回登录</div>
+    </div>
+
+    <!-- 步骤2：输入验证码 -->
+    <div id="step2" class="step">
+      <h2>验证邮箱</h2>
+      <p>验证码已发送至：<br><strong id="showEmail"></strong></p>
+      <input id="code" type="text" placeholder="请输入6位验证码" maxlength="6" inputmode="numeric" />
+      <button onclick="completeRegister()">完成注册</button>
+      <button onclick="backToStep1()" style="background:#ccc;margin-top:10px;">返回修改</button>
+    </div>
+  </div>
+
+  <script>
+    let currentEmail = '';
+
+    async function postJson(url, data) {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        try {
+          const json = JSON.parse(text);
+          throw new Error(json.error || '请求失败');
+        } catch {
+          throw new Error(text || '未知错误');
+        }
+      }
+      return await res.json();
+    }
+
+    async function sendCode() {
+      const user = document.getElementById('user').value.trim();
+      const pass = document.getElementById('pass').value;
+      const email = document.getElementById('email').value.trim();
+
+      if (!user || !pass || !email) {
+        alert('请填写所有字段');
+        return;
+      }
+      if (user.length < 3 || user.length > 16) {
+        alert('用户名长度需为3-16位');
+        return;
+      }
+      if (pass.length < 6) {
+        alert('密码至少6位');
+        return;
+      }
+      if (!/^\S+@\S+\.\S+$/.test(email)) {
+        alert('邮箱格式不正确');
+        return;
+      }
+
+      try {
+        await postJson('/chat/api/send_verification_code', { username: user, email });
+        currentEmail = email;
+        document.getElementById('showEmail').innerText = email;
+        document.getElementById('step1').classList.remove('active');
+        document.getElementById('step2').classList.add('active');
+      } catch (err) {
+        alert('发送失败：' + err.message);
+      }
+    }
+
+    async function completeRegister() {
+      const code = document.getElementById('code').value.trim();
+      const user = document.getElementById('user').value.trim();
+      const pass = document.getElementById('pass').value;
+
+      if (!code) {
+        alert('请输入验证码');
+        return;
+      }
+
+      try {
+        await postJson('/chat/api/verify_and_register', {
+          email: currentEmail,
+          code,
+          username: user,
+          password: pass
+        });
+        alert('注册成功！');
+        setTimeout(() => location.href = '/chat/login', 800);
+      } catch (err) {
+        alert('注册失败：' + err.message);
+      }
+    }
+
+    function backToStep1() {
+      document.getElementById('step2').classList.remove('active');
+      document.getElementById('step1').classList.add('active');
+    }
+  </script>
+</body>
+</html>
