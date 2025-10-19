@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>联系人 - WebChat</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+      font-family: sans-serif;
+    }
+
+    body {
+      background: #f9f9f9;
+      padding: 10px;
+      position: relative;
+      min-height: 100vh;
+    }
+
+    .header {
+      text-align: center;
+      padding: 10px;
+      font-weight: bold;
+      margin-bottom: 10px;
+      color: #333;
+    }
+
+    /* 顶部用户信息栏 */
+    .user-info-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: white;
+      padding: 12px;
+      border-radius: 8px;
+      font-size: 14px;
+      color: #333;
+      margin-bottom: 12px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+
+    .user-info-bar span {
+      flex: 1;
+      text-align: center;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      padding: 0 8px;
+    }
+
+    .user-info-bar span:nth-child(1) {
+      font-weight: bold;
+    }
+
+    .user-info-bar span:nth-child(2) {
+      flex: none;
+      min-width: 180px;
+      max-width: 180px;
+      width: 180px;
+      font-size: 13px;
+      color: #666;
+    }
+
+    .user-info-bar span:last-child {
+      font-weight: normal;
+      color: #666;
+    }
+
+    .contacts-container {
+      max-height: calc(100vh - 180px);
+      overflow-y: auto;
+      margin-bottom: 60px;
+    }
+
+    .contact-item {
+      padding: 12px;
+      background: white;
+      margin: 8px 0;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: background 0.2s;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+    }
+
+    .contact-item:hover {
+      background: #f0f8ff;
+    }
+
+    .contact-flex {
+      display: flex;
+      width: 100%;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0 10px;
+    }
+
+    .contact-col-left {
+      flex: 1;
+      text-align: center;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 14px;
+      color: #333;
+    }
+
+    .contact-col-center {
+      flex: none;
+      min-width: 180px;
+      max-width: 180px;
+      width: 180px;
+      text-align: center;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 13px;
+      color: #666;
+    }
+
+    .contact-col-right {
+      flex: 1;
+      text-align: center;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 13px;
+      color: #666;
+    }
+
+    .contact-name {
+      font-weight: bold;
+    }
+
+    .contact-email {
+      font-size: 13px;
+    }
+
+    .contact-remark {
+      margin-bottom: 4px;
+    }
+
+    .contact-edit,
+    .contact-delete {
+      font-size: 12px;
+      cursor: pointer;
+      text-decoration: underline;
+      display: inline-block;
+      margin: 0 4px;
+    }
+
+    .contact-edit {
+      color: #07c160;
+    }
+
+    .contact-delete {
+      color: #ff4d4f;
+    }
+
+    .footer {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      display: flex;
+      flex-direction: column;
+      background: white;
+      z-index: 10;
+      border-top: 1px solid #eee;
+    }
+
+    .btn {
+      width: 90%;
+      max-width: 400px;
+      padding: 12px;
+      background: #07c160;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      margin: 10px auto;
+      font-size: 14px;
+      cursor: pointer;
+    }
+
+    .nav {
+      display: flex;
+      justify-content: space-around;
+      padding: 10px;
+      background: white;
+    }
+    .nav a { text-decoration: none; color: #333; font-size: 14px; }
+    .nav a.active { color: #07c160; font-weight: bold; }
+  </style>
+</head>
+<body>
+  <div class="header">联系人</div>
+
+  <div class="user-info-bar" id="user-info-bar">
+    <span id="current-username">加载中...</span>
+    <span id="current-email">760274870@qq.com</span>
+    <span>备注</span>
+  </div>
+
+  <div class="contacts-container" id="contacts-list"></div>
+
+  <div class="footer">
+    <button class="btn" onclick="addFriend()">添加好友</button>
+    <div class="nav">
+      <a href="/chat/chat_list">聊天</a>
+      <a href="/chat/contacts" class="active">联系人</a>
+      <a href="/chat/discover">发现</a>
+    </div>
+  </div>
+
+  <script>
+    const currentUser = localStorage.getItem('currentUser');
+    if (!currentUser) location.href = '/chat/login';
+
+    async function getJson(url) {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return await res.json();
+    }
+
+    async function getUserInfo(username) {
+      try {
+        const data = await getJson(`/chat/api/user_info/${username}`);
+        return { username, email: data.email || '未绑定邮箱' };
+      } catch {
+        return { username, email: '未知邮箱' };
+      }
+    }
+
+    async function getFriendRemark(friend) {
+      try {
+        const res = await fetch(`/chat/api/friend_remarks/${currentUser}/${friend}`);
+        if (res.ok) {
+          const remarks = await res.json();
+          return remarks[friend] || '';
+        }
+      } catch (e) {
+        console.warn("获取备注失败:", e);
+      }
+      return '';
+    }
+
+    async function setFriendRemark(friend, remark) {
+      try {
+        const res = await fetch('/chat/api/set_friend_remark', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ user: currentUser, friend, remark })
+        });
+        if (!res.ok) throw new Error('保存失败');
+        return true;
+      } catch (e) {
+        console.error('设置备注失败:', e);
+        alert('保存备注失败');
+        return false;
+      }
+    }
+
+    async function deleteFriend(e, friend) {
+      e.stopPropagation(); // 阻止事件冒泡
+      if (!confirm(`确定要删除好友【${friend}】吗？删除后对方也将不再是你的好友。`)) {
+        return;
+      }
+      try {
+        const res = await fetch('/chat/api/delete_friend', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ user: currentUser, friend })
+        });
+        if (res.ok) {
+          loadContacts(); // 刷新
+        } else {
+          const err = await res.json();
+          alert('删除失败：' + (err.error || '未知错误'));
+        }
+      } catch (e) {
+        console.error('删除好友失败:', e);
+        alert('网络错误，请重试');
+      }
+    }
+
+    async function loadContacts() {
+      try {
+        const friends = await getJson(`/chat/api/friends/${currentUser}`);
+        const list = document.getElementById('contacts-list');
+        const friendNames = Array.isArray(friends) ? friends.map(f => typeof f === 'string' ? f : (f.username || f.name || '未知用户')) : [];
+
+        if (friendNames.length === 0) {
+          list.innerHTML = '<div style="padding:12px; color:#999;">暂无联系人</div>';
+          return;
+        }
+
+        const currentUserInfo = await getUserInfo(currentUser);
+        document.getElementById('current-username').textContent = currentUserInfo.username;
+        document.getElementById('current-email').textContent = currentUserInfo.email;
+
+        const contactItems = [];
+        for (const name of friendNames) {
+          const info = await getUserInfo(name);
+          const remark = await getFriendRemark(name);
+          const displayRemark = remark || '未备注';
+
+          contactItems.push(`
+            <div class="contact-item" onclick="openChat('${name.replace(/'/g, "\\'")}')">
+              <div class="contact-flex">
+                <div class="contact-col-left">
+                  <div class="contact-name">${info.username}</div>
+                </div>
+                <div class="contact-col-center">
+                  <div class="contact-email">${info.email}</div>
+                </div>
+                <div class="contact-col-right">
+                  <div class="contact-remark">${displayRemark}</div>
+                  <div>
+                    <span class="contact-edit" onclick="editRemark(event, '${name.replace(/'/g, "\\'")}')">编辑</span>
+                    <span class="contact-delete" onclick="deleteFriend(event, '${name.replace(/'/g, "\\'")}')">删除</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          `);
+        }
+        list.innerHTML = contactItems.join('');
+      } catch (err) {
+        console.error('加载联系人失败:', err);
+        list.innerHTML = '<div style="color:red; padding:12px;">加载失败</div>';
+      }
+    }
+
+    function openChat(friend) {
+      location.href = `/chat/chat?with=${encodeURIComponent(friend)}`;
+    }
+
+    async function editRemark(e, friend) {
+      e.stopPropagation(); // 阻止事件冒泡
+      const currentRemark = await getFriendRemark(friend);
+      const newRemark = prompt('请输入好友备注：', currentRemark);
+      if (newRemark !== null) {
+        const success = await setFriendRemark(friend, newRemark);
+        if (success) {
+          loadContacts();
+        }
+      }
+    }
+
+    function addFriend() {
+      const target = prompt('请输入对方用户名或邮箱:');
+      if (!target || !target.trim()) return;
+
+      fetch('/chat/api/add_friend_request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sender: currentUser, target: target.trim() })
+      })
+      .then(res => res.json())
+      .then(() => alert('好友申请已发送！'))
+      .catch(() => alert('发送失败'));
+    }
+
+    window.onload = loadContacts;
+  </script>
+</body>
+</html>
