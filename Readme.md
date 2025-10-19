@@ -2,7 +2,7 @@
 
 # V1
 
-## 初版网络聊天室
+### 初版网络聊天室
 
 1.登录，注册界面；
 
@@ -30,9 +30,9 @@
 
 
 
-## 本系统采用Python + Web + NGINX代理架构
+### 本系统采用Python + Web + NGINX代理架构
 
-### 一、安装NGINX
+#### 一、安装NGINX
 
 1. 更新系统包
 
@@ -134,7 +134,7 @@ sudo systemctl reload nginx
 
 
 
-### 二、安装Python及Flask
+#### 二、安装Python及Flask
 
 第一步：安装必要软件
 
@@ -190,7 +190,7 @@ data/requests/：好友申请，如 from_alice_to_bob.json
 
 
 
-### 三、配置相关信息
+#### 三、配置相关信息
 
 完成框架搭建后，写好python后端和html前端。
 
@@ -249,11 +249,11 @@ sudo nginx -t && sudo systemctl reload nginx
 
 
 
-### 建议
+#### 建议
 
 重启服务器后，本服务会自动关闭，推荐可以使用systemd服务，设置开机、崩溃自动重启
 
-#### 步骤 1：创建 systemd 服务文件
+##### 步骤 1：创建 systemd 服务文件
 
 sudo nano /etc/systemd/system/webchat.service
 
@@ -307,7 +307,7 @@ WantedBy=multi-user.target
 
 
 
-#### 步骤 2：启用并启动服务
+##### 步骤 2：启用并启动服务
 
 \# 重载 systemd 配置
 
@@ -397,17 +397,17 @@ ps aux | grep "app.py"
 
 
 
-## 效果如下
+### 效果如下
 
 
 
-### 移动端
+#### 移动端
 
 <img src=".\V1\picture\移动端-联系人.jpg" alt="移动端-联系人" style="zoom: 25%;" /><img src=".\V1\picture\移动端-发现.jpg" alt="移动端-发现" style="zoom:25%;" />
 
 
 
-### PC端
+#### PC端
 
 这个发现界面是V2版本的，当前版本没有“退出登录”和“注销账号”功能
 
@@ -423,19 +423,19 @@ ps aux | grep "app.py"
 
 # V2
 
-## 优化
+### 优化
 
 1.注册界面优化，注册成功后300ms自动跳转到登陆界面登录；
 
 
 
-## 修复
+### 修复
 
 1.修复移动端添加好友不稳定，无法添加情况。
 
 
 
-## 新增
+### 新增
 
 1.注册时新增校验，相同用户名不可重复注册；
 
@@ -447,7 +447,7 @@ A、B用户互为好友，A用户注销账户时，B用户联系人列表直接�
 
 
 
-# V2.1
+## V2.1
 
 ## 新增
 
@@ -457,11 +457,11 @@ A、B用户互为好友，A用户注销账户时，B用户联系人列表直接�
 
 
 
-# V2.2
+## V2.2
 
-## 优化
+### 优化
 
-### 优化时间问题，后台无法正常显示时间：
+#### 优化时间问题，后台无法正常显示时间：
 
 确保前后端都是字符串，而非时间戳。
 
@@ -507,7 +507,7 @@ def save_message(sender, receiver, content):
 
 所以我们必须**统一格式**。既然你坚持用字符串，那我们也把 `last_read` 存成**相同格式的字符串**。
 
-#### 步骤 1：修改 `mark_chat_as_read` 函数
+##### 步骤 1：修改 `mark_chat_as_read` 函数
 
 ```
 def mark_chat_as_read(user1, user2):
@@ -518,7 +518,7 @@ def mark_chat_as_read(user1, user2):
         json.dump({"last_read_time": current_time}, f, ensure_ascii=False, indent=2)
 ```
 
-#### 步骤 2：修改 `get_last_read_time` 函数
+##### 步骤 2：修改 `get_last_read_time` 函数
 
 让它返回字符串（或空字符串），而不是 0：
 
@@ -533,7 +533,7 @@ def get_last_read_time(user1, user2):
     return ""
 ```
 
-#### 步骤 3：修改 `unread_counts` 中的比较逻辑
+##### 步骤 3：修改 `unread_counts` 中的比较逻辑
 
 字符串时间不能直接比较大小！但幸运的是，`"2025-10-17 12:11"` 这种格式是 **字典序可比的**（ISO 格式），所以可以直接用 `>` 比较！
 
@@ -562,7 +562,7 @@ def unread_counts(username):
 
 
 
-### 最终修改汇总
+#### 最终修改汇总
 
 替换以下函数：
 
@@ -625,7 +625,7 @@ def unread_counts(username):
 
 ------
 
-### 📌 注意事项
+#### 📌 注意事项
 
 - 所有新消息的时间格式为：`"2025-10-17 12:11"`（无秒）
 - 旧数据如果是时间戳格式，**不会自动转换**。如果已有数据，建议清空 `data/messages` 和 `data/last_read` 测试，或写个迁移脚本。
@@ -636,7 +636,7 @@ def unread_counts(username):
 
 
 
-## 效果如下
+### 效果如下
 
 前端：
 
@@ -696,3 +696,76 @@ QQ_MAIL_PASSWORD=真实授权码
 
 
 将这个信息填好后，即可正常使用。
+
+
+
+## V3.1
+
+### 新增
+
+未读消息提示。
+
+
+
+### 优化
+
+调整轮询时间，增大服务器压力，优化用户使用体验。
+
+
+
+
+
+## V3.2
+
+### 优化
+
+1.优化chat.html聊天界面；
+
+2.优化chat界面滚轮刷新问题。
+
+
+
+
+
+## V3.3
+
+### 优化
+
+1.优化contacts.html聊天界面；
+
+2.优化次导航栏排布问题；
+
+3.优化聊天界面，扩大上传文件限制为2GB，不限制上传类型；
+
+4.优化图片预览效果；
+
+5.删除网页预览视频功能，将视频预览替换为下载功能，本地查看更流畅。
+
+
+
+### 新增
+
+1.添加好友备注；
+
+2.在发现栏显示当前邮箱；
+
+3.历史聊天记录。
+
+
+
+##### 注意
+
+扩大上传文件除了要修改前后端外，NGINX服务器本身限制也需要修改，在/etc/nginx/sites-available/default中，加入
+
+client_max_body_size 2G;   \# 设置最大上传文件大小为 2GB
+
+
+
+##### 优化后照片效果
+
+<img src=".\V3.3\picture\优化后联系人.png" alt="优化后联系人" style="zoom: 25%;" />
+
+
+
+
+
