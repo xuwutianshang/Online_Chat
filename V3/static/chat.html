@@ -144,7 +144,7 @@
     const friend = urlParams.get('with');
     if (!friend) location.href = '/chat/contacts';
 
-    document.getElementById('friend-name').textContent = friend;
+    document.getElementById('friend-name').textContent = decodeURIComponent(friend);
 
     async function getJson(url) {
       const res = await fetch(url);
@@ -162,49 +162,39 @@
       return await res.json();
     }
 
-    // ✅ 修复：支持时间戳（数字）和字符串时间格式
     function formatTime(timestamp) {
         let date;
-        
         if (typeof timestamp === 'string') {
             const parsedDate = new Date(timestamp);
-            if (isNaN(parsedDate.getTime())) {
-                console.warn('无法解析时间字符串:', timestamp);
-                return '未知时间';
-            }
+            if (isNaN(parsedDate.getTime())) return '未知时间';
             date = parsedDate;
-        } 
-        else if (typeof timestamp === 'number') {
+        } else if (typeof timestamp === 'number') {
             const isMilliseconds = timestamp > 10000000000;
             const seconds = isMilliseconds ? timestamp / 1000 : timestamp;
             date = new Date(seconds * 1000);
-            if (isNaN(date.getTime())) {
-                console.warn('Date 创建失败:', seconds);
-                return '未知时间';
-            }
-        } 
-        else {
-            console.warn('无效的时间类型:', typeof timestamp);
+            if (isNaN(date.getTime())) return '未知时间';
+        } else {
             return '未知时间';
         }
-
         const year = date.getFullYear();
         const month = String(date.getMonth() + 1).padStart(2, '0');
         const day = String(date.getDate()).padStart(2, '0');
         const hours = String(date.getHours()).padStart(2, '0');
         const minutes = String(date.getMinutes()).padStart(2, '0');
-
         return `${year}-${month}-${day} ${hours}:${minutes}`;
     }
 
     function renderMessage(msg) {
+      // ✅ 关键修复：使用 msg.from 而不是 msg.sender
+      const isSent = msg.from === currentUser;
       const div = document.createElement('div');
-      div.className = 'message ' + (msg.sender === currentUser ? 'sent' : 'received');
+      div.className = 'message ' + (isSent ? 'sent' : 'received');
 
       let content = null;
+      const text = msg.text;
 
-      if (typeof msg.text === 'object' && msg.text.type === 'file') {
-        const url = msg.text.url;
+      if (typeof text === 'object' && text !== null && text.type === 'file') {
+        const url = text.url;
         if (url.startsWith('data:image/')) {
           const img = document.createElement('img');
           img.src = url;
@@ -215,11 +205,11 @@
           video.controls = true;
           content = video;
         } else if (url.startsWith('/chat/uploads/')) {
-          if (msg.text.mimetype?.startsWith('image/')) {
+          if (text.mimetype?.startsWith('image/')) {
             const img = document.createElement('img');
             img.src = url;
             content = img;
-          } else if (msg.text.mimetype?.startsWith('video/')) {
+          } else if (text.mimetype?.startsWith('video/')) {
             const video = document.createElement('video');
             video.src = url;
             video.controls = true;
@@ -229,7 +219,7 @@
           }
         }
       } else {
-        content = document.createTextNode(msg.text || '[未知消息]');
+        content = document.createTextNode(text || '[未知消息]');
       }
 
       div.appendChild(content);
@@ -308,7 +298,7 @@
         });
         loadMessages();
       } catch (err) {
-        alert('文件发送失败: ' + err.message);
+        alert('文件发送失败: ' + (err.message || '未知错误'));
       }
 
       e.target.value = '';
@@ -323,7 +313,3 @@
   </script>
 </body>
 </html>
-
-
-
-

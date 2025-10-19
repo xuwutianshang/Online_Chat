@@ -40,11 +40,18 @@
       try {
         const friends = await getJson(`/chat/api/friends/${currentUser}`);
         const list = document.getElementById('contacts-list');
-        list.innerHTML = friends.map(f => 
-          `<div class="contact-item" onclick="openChat('${f}')">${f}</div>`
+        // 确保 friends 是字符串数组
+        const friendNames = Array.isArray(friends) ? friends.map(f => typeof f === 'string' ? f : (f.username || f.name || '未知用户')) : [];
+        if (friendNames.length === 0) {
+          list.innerHTML = '<div style="padding:12px; color:#999;">暂无联系人</div>';
+          return;
+        }
+        list.innerHTML = friendNames.map(name => 
+          `<div class="contact-item" onclick="openChat('${name.replace(/'/g, "\\'")}')">${name}</div>`
         ).join('');
       } catch (err) {
-        list.innerHTML = '<div style="color:red;">加载失败</div>';
+        console.error('加载联系人失败:', err);
+        list.innerHTML = '<div style="color:red; padding:12px;">加载失败</div>';
       }
     }
 
@@ -55,7 +62,6 @@
     function addFriend() {
       const target = prompt('请输入对方用户名:');
       if (!target || !target.trim()) return;
-
       fetch('/chat/api/add_friend_request', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

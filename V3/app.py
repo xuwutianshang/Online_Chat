@@ -7,22 +7,19 @@ import random
 import smtplib
 from email.mime.text import MIMEText
 from flask import Flask, request, jsonify, send_from_directory, redirect
-from dotenv import load_dotenv  # ← 新增
+from dotenv import load_dotenv
 
-# 加载 .env 文件（仅本地开发时生效）
 load_dotenv()
 
 app = Flask(__name__, static_folder='static')
 
-# === 邮箱配置（从 .env 读取，无默认值！）===
 QQ_EMAIL = os.getenv('QQ_EMAIL')
 QQ_MAIL_PASSWORD = os.getenv('QQ_MAIL_PASSWORD')
 
 if not QQ_EMAIL or not QQ_MAIL_PASSWORD:
     raise EnvironmentError("❌ 请在 .env 文件中设置 QQ_EMAIL 和 QQ_MAIL_PASSWORD")
 
-# 临时存储验证码（生产环境建议用 Redis）
-VERIFICATION_CODES = {}  # {email: {'code': '123456', 'expires': timestamp, 'username': 'xxx'}}
+VERIFICATION_CODES = {}
 
 DATA_DIR = 'data'
 os.makedirs(f'{DATA_DIR}/users', exist_ok=True)
@@ -47,7 +44,6 @@ def get_user(username):
     return None
 
 def send_verification_email(email, code):
-    """发送验证码邮件"""
     try:
         msg = MIMEText(f'您的验证码是：{code}\n有效期5分钟。', 'plain', 'utf-8')
         msg['From'] = QQ_EMAIL
@@ -97,7 +93,6 @@ def send_verification_code():
     else:
         return jsonify({"error": "邮件发送失败，请检查邮箱或稍后重试"}), 500
 
-# ----------------- 新增 API：验证验证码并注册 -----------------
 @app.route('/chat/api/verify_and_register', methods=['POST'])
 def verify_and_register():
     data = request.json
@@ -124,7 +119,6 @@ def verify_and_register():
     VERIFICATION_CODES.pop(email, None)
     return jsonify({"ok": True})
 
-# ----------------- 找回密码：发验证码 -----------------
 @app.route('/chat/api/request_password_reset', methods=['POST'])
 def request_password_reset():
     data = request.json
@@ -152,7 +146,6 @@ def request_password_reset():
     else:
         return jsonify({"error": "邮件发送失败"}), 500
 
-# ----------------- 重置密码 -----------------
 @app.route('/chat/api/reset_password', methods=['POST'])
 def reset_password():
     data = request.json
@@ -184,7 +177,7 @@ def reset_password():
     VERIFICATION_CODES.pop(email, None)
     return jsonify({"ok": True})
 
-# ----------------- 其他 API（保持不变）-----------------
+# ----------------- 修复：unread_counts -----------------
 @app.route('/chat/api/unread_counts/<username>')
 def unread_counts(username):
     if not user_exists(username):
@@ -210,8 +203,15 @@ def mark_read():
     friend = data.get('friend')
     if not user or not friend:
         return jsonify({"ok": False}), 400
-    mark_chat_as_read(user, friend)
+    mark_chat_as_read(user, friend)  # 仅标记 user 的已读时间
     return jsonify({"ok": True})
+
+def mark_chat_as_read(user, friend):
+    from datetime import datetime
+    now = datetime.utcnow().isoformat() + 'Z'
+    with open(f'{DATA_DIR}/last_read/{user}_{friend}.txt', 'w') as f:
+        f.write(now)
+    # 注意：不要写 friend_user.txt，那是对方的已读状态！
 
 @app.route('/chat/api/unread_friend_requests/<username>')
 def unread_friend_requests(username):
@@ -244,25 +244,39 @@ def login():
 def friends_list(username):
     return jsonify(get_friends(username))
 
+# ----------------- 修复：添加好友请求（防重复）-----------------
 @app.route('/chat/api/add_friend_request', methods=['POST'])
 def add_friend_request():
     data = request.json
     sender = data['sender']
     target = data['target']
+    if sender == target:
+        return jsonify({"error": "不能添加自己为好友"}), 400
     if not user_exists(target):
         return jsonify({"error": "用户不存在"}), 404
+    if target in get_friends(sender):
+        return jsonify({"error": "你们已是好友"}), 409
+
+    reqs = get_friend_requests(target)
+    if sender in reqs:
+        return jsonify({"error": "已发送过好友请求"}), 409
+
     save_friend_request(sender, target)
     return jsonify({"ok": True})
 
 @app.route('/chat/api/friend_requests/<username>')
 def friend_requests(username):
-    return jsonify(get_friend_requests(username))
+    reqs = get_friend_requests(username)
+    # 返回纯字符串数组，如 ["alice", "bob"]
+    return jsonify(reqs)
 
 @app.route('/chat/api/accept_friend', methods=['POST'])
 def accept_friend():
     data = request.json
     user = data['user']
     friend = data['friend']
+    if friend not in get_friend_requests(user):
+        return jsonify({"error": "无此好友请求"}), 400
     add_friend(user, friend)
     add_friend(friend, user)
     remove_friend_request(friend, user)
@@ -362,7 +376,7 @@ def delete_account():
     delete_user_completely(username)
     return jsonify({"ok": True})
 
-# ----------------- 前端页面路由 -----------------
+# ----------------- 前端路由 -----------------
 @app.route('/chat/')
 def index():
     return redirect('/chat/login', code=302)
@@ -403,7 +417,8 @@ def get_friends(username):
     path = f'{DATA_DIR}/friends/{username}.json'
     if os.path.exists(path):
         with open(path, encoding='utf-8') as f:
-            return json.load(f)
+            data = json.load(f)
+            return [f for f in data if user_exists(f)]  # 过滤已删除用户
     return []
 
 def get_last_read_time(user, friend):
@@ -412,14 +427,6 @@ def get_last_read_time(user, friend):
         with open(path, 'r') as f:
             return f.read().strip()
     return None
-
-def mark_chat_as_read(user, friend):
-    from datetime import datetime
-    now = datetime.utcnow().isoformat() + 'Z'
-    with open(f'{DATA_DIR}/last_read/{user}_{friend}.txt', 'w') as f:
-        f.write(now)
-    with open(f'{DATA_DIR}/last_read/{friend}_{user}.txt', 'w') as f:
-        f.write(now)
 
 def get_messages(user1, user2):
     path = f'{DATA_DIR}/messages/{user1}_{user2}.json'
@@ -460,7 +467,8 @@ def get_friend_requests(username):
     path = f'{DATA_DIR}/requests/{username}.json'
     if os.path.exists(path):
         with open(path, encoding='utf-8') as f:
-            return json.load(f)
+            reqs = json.load(f)
+            return [r for r in reqs if user_exists(r)]  # 过滤已删除的请求者
     return []
 
 def add_friend(user, friend):
@@ -496,6 +504,7 @@ def change_user_username(old_username, new_username):
     user = get_user(old_username)
     if not user:
         return False, "原用户不存在"
+    # ⚠️ 注意：这里未迁移 messages/friends 等数据，生产环境需实现
     os.remove(f'{DATA_DIR}/users/{old_username}.json')
     save_user(new_username, user['password'], user.get('email', ''))
     return True, "修改成功"
@@ -513,6 +522,21 @@ def delete_user_completely(username):
     for f in os.listdir(f'{DATA_DIR}/messages'):
         if f.startswith(username + '_') or f.endswith('_' + username + '.json'):
             os.remove(os.path.join(f'{DATA_DIR}/messages', f))
+    # 清理他人的好友列表和请求
+    for user_file in os.listdir(f'{DATA_DIR}/friends'):
+        user = user_file.replace('.json', '')
+        friends = get_friends(user)
+        if username in friends:
+            friends.remove(username)
+            with open(f'{DATA_DIR}/friends/{user_file}', 'w', encoding='utf-8') as f:
+                json.dump(friends, f, ensure_ascii=False, indent=2)
+    for req_file in os.listdir(f'{DATA_DIR}/requests'):
+        target = req_file.replace('.json', '')
+        reqs = get_friend_requests(target)
+        if username in reqs:
+            reqs.remove(username)
+            with open(f'{DATA_DIR}/requests/{req_file}', 'w', encoding='utf-8') as f:
+                json.dump(reqs, f, ensure_ascii=False, indent=2)
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
