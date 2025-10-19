@@ -1,0 +1,129 @@
+<!-- chat_list.html -->
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>聊天 - WebChat</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; font-family: sans-serif; }
+    body {
+      background: #f9f9f9;
+      padding: 10px;
+      padding-bottom: 60px;
+    }
+    .header { text-align: center; padding: 10px; font-weight: bold; }
+    .chat-item {
+      padding: 12px;
+      background: white;
+      margin: 8px 0;
+      border-radius: 6px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      cursor: pointer;
+    }
+    .chat-item:hover { background: #f0f0f0; }
+    .contact-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .unread-badge {
+      background: #ff4444;
+      color: white;
+      border-radius: 50%;
+      width: 18px;
+      height: 18px;
+      font-size: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 18px;
+    }
+    .nav {
+      position: fixed;
+      bottom: 0px;
+      left: 0;
+      right: 0;
+      display: flex;
+      justify-content: space-around;
+      background: white;
+      padding: 10px;
+      border-top: 1px solid #ddd;
+    }
+    .nav a {
+      text-decoration: none;
+      color: #333;
+    }
+    .nav a.active {
+      color: #07c160;
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">聊天</div>
+  <div id="chat-list"></div>
+
+  <div class="nav">
+    <a href="/chat/chat_list" class="active">聊天</a>
+    <a href="/chat/contacts">联系人</a>
+    <a href="/chat/discover">发现</a>
+  </div>
+
+  <script>
+    const currentUser = localStorage.getItem('currentUser');
+    if (!currentUser) location.href = '/chat/login';
+
+    async function getJson(url) {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return await res.json();
+    }
+
+    async function loadChatList() {
+      try {
+        const friends = await getJson(`/chat/api/friends/${currentUser}`);
+        const unreadCounts = await getJson(`/chat/api/unread_counts/${currentUser}`);
+        const list = document.getElementById('chat-list');
+
+        const friendNames = Array.isArray(friends) ? friends.map(f => typeof f === 'string' ? f : (f.username || f.name || '未知用户')) : [];
+
+        if (friendNames.length === 0) {
+          list.innerHTML = '<div style="padding:12px; color:#999;">暂无联系人</div>';
+          return;
+        }
+
+        list.innerHTML = friendNames.map(name => {
+          const unread = unreadCounts[name] || 0;
+          return `
+            <div class="chat-item" onclick="openChat('${encodeURIComponent(name)}')">
+              <span class="contact-name">${name}</span>
+              ${unread > 0 ? `<span class="unread-badge">${unread}</span>` : ''}
+            </div>
+          `;
+        }).join('');
+      } catch (err) {
+        console.error('加载聊天列表失败:', err);
+        list.innerHTML = '<div style="color:red; padding:12px;">加载失败</div>';
+      }
+    }
+
+    async function openChat(friend) {
+      try {
+        await fetch('/chat/api/mark_read', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ from: friend, to: currentUser })
+        });
+      } catch (err) {
+        console.warn('标记已读失败:', err);
+      }
+      location.href = `/chat/chat?with=${encodeURIComponent(friend)}`;
+    }
+
+    // 初始加载
+    loadChatList();
+
+    // ✅ 新增：每 3 秒轮询更新未读数（包括红点）
+    setInterval(loadChatList, 500);
+  </script>
+</body>
+</html>

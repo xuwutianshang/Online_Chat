@@ -1,0 +1,762 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>聊天 - WebChat</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; font-family: sans-serif; }
+    body {
+      background: #e5ddd5;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      padding-bottom: 50px;
+    }
+    #header {
+      padding: 10px;
+      background: #07c160;
+      color: white;
+      text-align: center;
+      position: relative;
+    }
+    #header .history-btn {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      background: #fff;
+      color: #07c160;
+      border: none;
+      padding: 5px 10px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    #messages {
+      flex: 1;
+      padding: 10px;
+      overflow-y: auto;
+      padding-bottom: 80px;
+    }
+    .message {
+      max-width: 70%;
+      padding: 8px 12px;
+      margin: 6px 0;
+      border-radius: 8px;
+      word-wrap: break-word;
+    }
+    .sent {
+      background: #dcf8c6;
+      margin-left: auto;
+      text-align: right;
+    }
+    .received {
+      background: white;
+    }
+    .message img {
+      max-width: 200px;
+      max-height: 300px;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+    .download-btn {
+      display: inline-block;
+      margin-top: 6px;
+      padding: 4px 8px;
+      background: #07c160;
+      color: white;
+      text-decoration: none;
+      border-radius: 4px;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .download-btn:hover {
+      background: #06a64e;
+    }
+    .time-label {
+      font-size: 12px;
+      color: #999;
+      margin-top: 4px;
+      text-align: right;
+      white-space: nowrap;
+    }
+    .sent .time-label {
+      text-align: right;
+    }
+    .received .time-label {
+      text-align: left;
+    }
+    #input-area {
+      display: flex;
+      padding: 10px;
+      background: white;
+      border-top: 1px solid #ddd;
+      position: fixed;
+      bottom: 40px;
+      left: 0;
+      right: 0;
+      z-index: 10;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+    }
+    #message-input {
+      flex: 1;
+      padding: 10px;
+      border: 1px solid #ccc;
+      border-radius: 20px;
+    }
+    #send-btn {
+      padding: 10px 20px;
+      margin-left: 10px;
+      background: #07c160;
+      color: white;
+      border: none;
+      border-radius: 20px;
+    }
+    #upload-btn {
+      background: #ccc;
+      border: none;
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-left: 8px;
+      cursor: pointer;
+      font-size: 18px;
+    }
+    #file-input {
+      display: none;
+    }
+    .nav {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      display: flex;
+      justify-content: space-around;
+      background: white;
+      padding: 10px;
+    }
+    .nav a {
+      text-decoration: none;
+      color: #333;
+    }
+
+    /* 待发送区域 */
+    #pending-area {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      background: #f0f0f0;
+      padding: 10px;
+      border-radius: 8px;
+      display: none;
+      z-index: 20;
+      min-width: 100px;
+      max-width: 300px;
+      overflow: hidden;
+    }
+    .pending-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+    .pending-item img, .pending-item video {
+      width: 40px;
+      height: 40px;
+      object-fit: cover;
+      border-radius: 4px;
+    }
+    .pending-item .name {
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .pending-item .status {
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: #ccc;
+      display: inline-block;
+    }
+    .pending-item .status.uploading {
+      background: #07c160;
+      animation: spin 1s linear infinite;
+    }
+    @keyframes spin {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+    .pending-item .btn {
+      background: #07c160;
+      color: white;
+      border: none;
+      padding: 4px 8px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    .pending-item .btn:hover {
+      background: #06a64e;
+    }
+    .pending-item .btn.cancel {
+      background: #ff6b6b;
+    }
+    .pending-item .btn.cancel:hover {
+      background: #ff4d4d;
+    }
+
+    /* 历史聊天记录模态框 */
+    .modal {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0,0,0,0.5);
+      z-index: 1000;
+      overflow: auto;
+    }
+    .modal-content {
+      background: white;
+      margin: 40px auto;
+      width: 80%;
+      max-width: 800px;
+      max-height: 80vh;
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .modal-header {
+      padding: 15px;
+      background: #07c160;
+      color: white;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .modal-body {
+      padding: 15px;
+      overflow-y: auto;
+      max-height: 60vh;
+      font-size: 14px;
+    }
+    .modal-footer {
+      padding: 10px;
+      text-align: right;
+    }
+    .close {
+      color: #aaa;
+      float: right;
+      font-size: 28px;
+      font-weight: bold;
+      cursor: pointer;
+    }
+    .close:hover {
+      color: #000;
+    }
+    .full-message {
+      padding: 8px 12px;
+      margin: 6px 0;
+      border-radius: 8px;
+      word-wrap: break-word;
+      max-width: 100%;
+    }
+    .full-sent {
+      background: #dcf8c6;
+      margin-left: auto;
+      text-align: right;
+    }
+    .full-received {
+      background: white;
+    }
+    .full-time-label {
+      font-size: 12px;
+      color: #999;
+      margin-top: 4px;
+      text-align: right;
+      white-space: nowrap;
+    }
+    .full-sent .full-time-label {
+      text-align: right;
+    }
+    .full-received .full-time-label {
+      text-align: left;
+    }
+  </style>
+</head>
+<body>
+  <div id="header">
+    与 <span id="friend-name">—</span> 聊天
+    <button class="history-btn" onclick="openHistory()">历史聊天记录</button>
+  </div>
+  <div id="messages"></div>
+
+  <div id="input-area">
+    <input id="message-input" placeholder="输入消息..." />
+    <label for="file-input" id="upload-btn">📎</label>
+    <input type="file" id="file-input" accept="image/*,video/*,.pdf,.doc,.docx,.txt,.zip,.rar,.mp3,.wav" multiple />
+    <button id="send-btn" onclick="sendMessage()">发送</button>
+  </div>
+
+  <div class="nav">
+    <a href="/chat/chat_list">聊天</a>
+    <a href="/chat/contacts">联系人</a>
+    <a href="/chat/discover">发现</a>
+  </div>
+
+  <div id="pending-area"></div>
+
+  <!-- 历史聊天记录模态框 -->
+  <div id="history-modal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>历史聊天记录</h3>
+        <span class="close" onclick="closeHistory()">&times;</span>
+      </div>
+      <div class="modal-body" id="history-messages">
+        <!-- 消息将通过 JS 动态加载 -->
+      </div>
+      <div class="modal-footer">
+        <button onclick="closeHistory()">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const currentUser = localStorage.getItem('currentUser');
+    if (!currentUser) location.href = '/chat/login';
+
+    const urlParams = new URLSearchParams(window.location.search);
+    const friend = urlParams.get('with');
+    if (!friend) location.href = '/chat/contacts';
+
+    document.getElementById('friend-name').textContent = decodeURIComponent(friend);
+
+    async function getJson(url) {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return await res.json();
+    }
+
+    async function postJson(url, data) {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return await res.json();
+    }
+
+    function formatTime(timestamp) {
+      let date;
+      if (typeof timestamp === 'string') {
+        const parsedDate = new Date(timestamp);
+        if (isNaN(parsedDate.getTime())) return '未知时间';
+        date = parsedDate;
+      } else if (typeof timestamp === 'number') {
+        const isMilliseconds = timestamp > 10000000000;
+        const seconds = isMilliseconds ? timestamp / 1000 : timestamp;
+        date = new Date(seconds * 1000);
+        if (isNaN(date.getTime())) return '未知时间';
+      } else {
+        return '未知时间';
+      }
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      const hours = String(date.getHours()).padStart(2, '0');
+      const minutes = String(date.getMinutes()).padStart(2, '0');
+      return `${year}-${month}-${day} ${hours}:${minutes}`;
+    }
+
+    function renderMessage(msg) {
+      const isSent = msg.from === currentUser;
+      const div = document.createElement('div');
+      div.className = 'message ' + (isSent ? 'sent' : 'received');
+
+      let content = null;
+      const text = msg.text;
+
+      if (typeof text === 'object' && text !== null && text.type === 'file') {
+        const url = text.url;
+        const originalName = text.original_name || url.split('/').pop();
+        const filename = originalName.replace(/^.*[\\/]/, '');
+
+        if (url.startsWith('data:image/') || (url.startsWith('/chat/uploads/') && text.mimetype?.startsWith('image/'))) {
+          const img = document.createElement('img');
+          img.src = url;
+          content = img;
+
+          img.onclick = () => {
+            const viewer = document.createElement('div');
+            viewer.style.cssText = `
+              position: fixed;
+              top: 0;
+              left: 0;
+              right: 0;
+              bottom: 0;
+              background: rgba(0,0,0,0.8);
+              display: flex;
+              justify-content: center;
+              align-items: center;
+              z-index: 1000;
+              cursor: pointer;
+            `;
+            const imgClone = img.cloneNode();
+            imgClone.style.maxWidth = '90%';
+            imgClone.style.maxHeight = '90%';
+            viewer.appendChild(imgClone);
+            viewer.onclick = () => document.body.removeChild(viewer);
+            document.body.appendChild(viewer);
+          };
+        } else if (text.mimetype?.startsWith('video/')) {
+          content = document.createTextNode(`上传了一个视频，请下载后查看“${filename}”`);
+        } else {
+          content = document.createTextNode(`[文件] ${filename}`);
+        }
+
+        div.appendChild(content);
+
+        const downloadLink = document.createElement('a');
+        downloadLink.className = 'download-btn';
+        downloadLink.href = url;
+        downloadLink.download = filename;
+        downloadLink.textContent = '下载';
+        div.appendChild(downloadLink);
+      } else {
+        content = document.createTextNode(text || '[未知消息]');
+        div.appendChild(content);
+      }
+
+      const timeLabel = document.createElement('div');
+      timeLabel.className = 'time-label';
+      timeLabel.textContent = formatTime(msg.time);
+      div.appendChild(timeLabel);
+
+      return div;
+    }
+
+    function renderFullMessage(msg) {
+      const isSent = msg.from === currentUser;
+      const div = document.createElement('div');
+      div.className = 'full-message ' + (isSent ? 'full-sent' : 'full-received');
+
+      let content = null;
+      const text = msg.text;
+
+      if (typeof text === 'object' && text !== null && text.type === 'file') {
+        const url = text.url;
+        const originalName = text.original_name || url.split('/').pop();
+        const filename = originalName.replace(/^.*[\\/]/, '');
+
+        if (url.startsWith('data:image/') || (url.startsWith('/chat/uploads/') && text.mimetype?.startsWith('image/'))) {
+          const img = document.createElement('img');
+          img.src = url;
+          content = img;
+          img.onclick = () => {
+            const viewer = document.createElement('div');
+            viewer.style.cssText = `
+              position: fixed;
+              top: 0;
+              left: 0;
+              right: 0;
+              bottom: 0;
+              background: rgba(0,0,0,0.8);
+              display: flex;
+              justify-content: center;
+              align-items: center;
+              z-index: 1000;
+              cursor: pointer;
+            `;
+            const imgClone = img.cloneNode();
+            imgClone.style.maxWidth = '90%';
+            imgClone.style.maxHeight = '90%';
+            viewer.appendChild(imgClone);
+            viewer.onclick = () => document.body.removeChild(viewer);
+            document.body.appendChild(viewer);
+          };
+        } else if (text.mimetype?.startsWith('video/')) {
+          content = document.createTextNode(`上传了一个视频，请下载后查看“${filename}”`);
+        } else {
+          content = document.createTextNode(`[文件] ${filename}`);
+        }
+
+        div.appendChild(content);
+
+        const downloadLink = document.createElement('a');
+        downloadLink.className = 'download-btn';
+        downloadLink.href = url;
+        downloadLink.download = filename;
+        downloadLink.textContent = '下载';
+        div.appendChild(downloadLink);
+      } else {
+        content = document.createTextNode(text || '[未知消息]');
+        div.appendChild(content);
+      }
+
+      const timeLabel = document.createElement('div');
+      timeLabel.className = 'full-time-label';
+      timeLabel.textContent = formatTime(msg.time);
+      div.appendChild(timeLabel);
+
+      return div;
+    }
+
+    let lastMessageCount = 0;
+
+    async function loadMessages() {
+      try {
+        const msgs = await getJson(`/chat/api/messages/${currentUser}/${friend}`);
+        const container = document.getElementById('messages');
+
+        const isAtBottom = container.scrollHeight - container.scrollTop <= container.clientHeight + 2;
+        const oldScrollTop = container.scrollTop;
+        const oldScrollHeight = container.scrollHeight;
+
+        container.innerHTML = '';
+        msgs.forEach(msg => {
+          container.appendChild(renderMessage(msg));
+        });
+
+        if (isAtBottom || lastMessageCount === 0) {
+          container.scrollTop = container.scrollHeight;
+        } else {
+          const newScrollHeight = container.scrollHeight;
+          container.scrollTop = newScrollHeight - oldScrollHeight + oldScrollTop;
+        }
+
+        lastMessageCount = msgs.length;
+      } catch (err) {
+        console.error('加载消息失败:', err);
+      }
+    }
+
+    async function markMessagesAsRead() {
+      try {
+        const msgs = await getJson(`/chat/api/messages/${currentUser}/${friend}`);
+        const unreadMsgs = msgs.filter(m => m.from !== currentUser && !m.read);
+        if (unreadMsgs.length > 0) {
+          const ids = unreadMsgs.map(m => m.id);
+          await fetch(`/chat/api/mark_read`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ user: currentUser, friend: friend, message_ids: ids })
+          });
+        }
+      } catch (err) {
+        console.warn('标记已读失败:', err);
+      }
+    }
+
+    async function sendMessage() {
+      const input = document.getElementById('message-input');
+      const text = input.value.trim();
+      if (!text) return;
+
+      try {
+        await postJson('/chat/api/send_message', { from: currentUser, to: friend, text });
+        input.value = '';
+        loadMessages();
+      } catch (err) {
+        alert('发送失败');
+      }
+    }
+
+    // 待发送区域管理
+    const pendingArea = document.getElementById('pending-area');
+    let pendingFiles = [];
+
+    document.getElementById('file-input').addEventListener('change', async (e) => {
+      const files = e.target.files;
+      if (!files.length) return;
+
+      for (const file of files) {
+        const maxSize = 2 * 1024 * 1024 * 1024; // 2GB
+        if (file.size > maxSize) {
+          alert(`文件 "${file.name}" 太大，最大支持 2GB`);
+          continue;
+        }
+
+        const item = {
+          file,
+          status: 'pending',
+          element: null
+        };
+
+        const div = document.createElement('div');
+        div.className = 'pending-item';
+        div.dataset.fileId = item.file.name;
+
+        let preview = null;
+        if (item.file.type.startsWith('image/')) {
+          const img = document.createElement('img');
+          img.src = URL.createObjectURL(item.file);
+          preview = img;
+        } else if (item.file.type.startsWith('video/')) {
+          const video = document.createElement('video');
+          video.src = URL.createObjectURL(item.file);
+          video.width = 40;
+          video.height = 40;
+          video.controls = false;
+          preview = video;
+        } else {
+          preview = document.createElement('div');
+          preview.style.cssText = 'background: #ccc; width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 12px;';
+          preview.textContent = '📁';
+        }
+
+        div.appendChild(preview);
+        div.appendChild(document.createTextNode(file.name));
+        div.appendChild(document.createTextNode(' (' + (file.size / (1024 * 1024)).toFixed(2) + 'MB)'));
+
+        const statusSpan = document.createElement('div');
+        statusSpan.className = 'status';
+        div.appendChild(statusSpan);
+
+        const sendBtn = document.createElement('button');
+        sendBtn.className = 'btn';
+        sendBtn.textContent = '发送';
+        sendBtn.onclick = () => sendFile(item);
+        div.appendChild(sendBtn);
+
+        const cancelBtn = document.createElement('button');
+        cancelBtn.className = 'btn cancel';
+        cancelBtn.textContent = '取消';
+        cancelBtn.onclick = () => removePending(item);
+        div.appendChild(cancelBtn);
+
+        div.onmouseenter = () => {
+          div.style.opacity = 0.8;
+        };
+        div.onmouseleave = () => {
+          div.style.opacity = 1;
+        };
+
+        pendingArea.appendChild(div);
+        item.element = div;
+
+        uploadFile(item);
+      }
+
+      pendingArea.style.display = 'block';
+      e.target.value = '';
+    });
+
+    async function uploadFile(item) {
+      const formData = new FormData();
+      formData.append('file', item.file);
+
+      item.status = 'uploading';
+      item.element.querySelector('.status').classList.add('uploading');
+
+      try {
+        const res = await fetch('/chat/api/send_file', {
+          method: 'POST',
+          body: formData,
+        });
+
+        if (!res.ok) {
+          const errorText = await res.text();
+          throw new Error(`HTTP ${res.status}: ${errorText}`);
+        }
+
+        const result = await res.json();
+        if (result.ok) {
+          item.url = result.url;
+          item.original_name = result.original_name;
+          item.mimetype = item.file.type || 'application/octet-stream';
+          item.status = 'success';
+          item.element.querySelector('.status').classList.remove('uploading');
+          item.element.querySelector('.btn').textContent = '已上传';
+        } else {
+          throw new Error(result.error || '上传失败');
+        }
+      } catch (err) {
+        console.error('上传失败:', err.message);
+        item.status = 'error';
+        item.element.querySelector('.status').classList.remove('uploading');
+        item.element.querySelector('.btn').textContent = '重试';
+        item.element.querySelector('.btn').onclick = () => uploadFile(item);
+        alert('上传失败: ' + err.message);
+      }
+    }
+
+    function sendFile(item) {
+      if (item.status !== 'success') {
+        alert('文件尚未上传完成！');
+        return;
+      }
+
+      try {
+        postJson('/chat/api/send_message', {
+          from: currentUser,
+          to: friend,
+          text: {
+            type: 'file',
+            url: item.url,
+            mimetype: item.mimetype,
+            original_name: item.original_name
+          }
+        }).then(() => {
+          loadMessages();
+          removePending(item);
+        }).catch(err => {
+          alert('发送失败: ' + err.message);
+        });
+      } catch (err) {
+        alert('发送失败: ' + err.message);
+      }
+    }
+
+    function removePending(item) {
+      if (item.element) {
+        pendingArea.removeChild(item.element);
+        item.element = null;
+      }
+      pendingFiles = pendingFiles.filter(f => f !== item);
+      if (pendingFiles.length === 0) {
+        pendingArea.style.display = 'none';
+      }
+    }
+
+    document.getElementById('message-input').addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') sendMessage();
+    });
+
+    // 初始加载
+    loadMessages();
+    markMessagesAsRead();
+
+    setInterval(loadMessages, 3000);
+
+    // 历史聊天记录功能
+    async function openHistory() {
+      const modal = document.getElementById('history-modal');
+      const messagesContainer = document.getElementById('history-messages');
+      messagesContainer.innerHTML = '<p style="text-align:center;">加载中...</p>';
+
+      try {
+        const msgs = await getJson(`/chat/api/messages/${currentUser}/${friend}`);
+        messagesContainer.innerHTML = '';
+
+        msgs.forEach(msg => {
+          messagesContainer.appendChild(renderFullMessage(msg));
+        });
+      } catch (err) {
+        messagesContainer.innerHTML = `<p style="color:red;">加载失败：${err.message}</p>`;
+      }
+
+      modal.style.display = 'block';
+    }
+
+    function closeHistory() {
+      document.getElementById('history-modal').style.display = 'none';
+    }
+  </script>
+</body>
+</html>
