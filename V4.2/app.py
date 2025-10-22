@@ -1,0 +1,768 @@
+import os
+import json
+import time
+import uuid
+import shutil
+import random
+import smtplib
+from email.mime.text import MIMEText
+from flask import Flask, request, jsonify, send_from_directory, redirect
+from dotenv import load_dotenv
+
+load_dotenv()
+
+app = Flask(__name__, static_folder='static')
+
+# 设置最大上传大小为 2GB
+app.config['MAX_CONTENT_LENGTH'] = 2 * 1024 * 1024 * 1024  # 2GB
+
+QQ_EMAIL = os.getenv('QQ_EMAIL')
+QQ_MAIL_PASSWORD = os.getenv('QQ_MAIL_PASSWORD')
+SUPER_ADMIN = os.getenv('SUPER_ADMIN_USERNAME')
+SUPER_ADMIN_PASSWORD = os.getenv('SUPER_ADMIN_PASSWORD')
+
+# 环境变量校验
+required_vars = ['QQ_EMAIL', 'QQ_MAIL_PASSWORD', 'SUPER_ADMIN_USERNAME', 'SUPER_ADMIN_PASSWORD']
+missing = [var for var in required_vars if not os.getenv(var)]
+if missing:
+    raise EnvironmentError(f"❌ 请在 .env 文件中设置以下缺失的环境变量: {', '.join(missing)}")
+
+VERIFICATION_CODES = {}
+
+DATA_DIR = 'data'
+os.makedirs(f'{DATA_DIR}/users', exist_ok=True)
+os.makedirs(f'{DATA_DIR}/messages', exist_ok=True)
+os.makedirs(f'{DATA_DIR}/friends', exist_ok=True)
+os.makedirs(f'{DATA_DIR}/requests', exist_ok=True)
+os.makedirs(f'{DATA_DIR}/uploads', exist_ok=True)
+os.makedirs(f'{DATA_DIR}/last_read', exist_ok=True)
+
+REMARKS_DIR = f'{DATA_DIR}/friends_remarks'
+os.makedirs(REMARKS_DIR, exist_ok=True)
+
+# ----------------- 超级管理员配置（已从 .env 读取） -----------------
+# 确保超级管理员账户存在，并使用 QQ_EMAIL 作为邮箱
+def ensure_super_admin():
+    if not user_exists(SUPER_ADMIN):
+        save_user(SUPER_ADMIN, SUPER_ADMIN_PASSWORD, email=QQ_EMAIL)
+        print(f"✅ 超级管理员账户 '{SUPER_ADMIN}' 已自动创建，邮箱为：{QQ_EMAIL}")
+
+# ----------------- 工具函数 -----------------
+def user_exists(username):
+    return os.path.exists(f'{DATA_DIR}/users/{username}.json')
+
+def save_user(username, password, email=""):
+    with open(f'{DATA_DIR}/users/{username}.json', 'w', encoding='utf-8') as f:
+        json.dump({"username": username, "password": password, "email": email}, f, ensure_ascii=False, indent=2)
+
+def get_user(username):
+    if user_exists(username):
+        with open(f'{DATA_DIR}/users/{username}.json', encoding='utf-8') as f:
+            return json.load(f)
+    return None
+
+def find_user_by_email(email):
+    for file in os.listdir(f'{DATA_DIR}/users'):
+        if file.endswith('.json'):
+            with open(f'{DATA_DIR}/users/{file}', encoding='utf-8') as f:
+                user_data = json.load(f)
+                if user_data.get('email') == email:
+                    return user_data
+    return None
+
+def send_verification_email(email, code):
+    try:
+        msg = MIMEText(f'您的验证码是：{code}\n有效期5分钟。', 'plain', 'utf-8')
+        msg['From'] = QQ_EMAIL
+        msg['To'] = email
+        msg['Subject'] = "【WebChat】注册/找回密码验证码"
+
+        server = smtplib.SMTP_SSL("smtp.qq.com", 465)
+        server.login(QQ_EMAIL, QQ_MAIL_PASSWORD)
+        server.sendmail(QQ_EMAIL, [email], msg.as_string())
+        server.quit()
+        return True
+    except Exception as e:
+        print("邮件发送失败:", str(e))
+        return False
+
+# ----------------- 自动添加超级管理员为好友 -----------------
+def auto_add_super_admin_as_friend(new_user):
+    """注册后自动双向添加超级管理员为好友"""
+    if not user_exists(SUPER_ADMIN):
+        return  # 安全兜底
+    add_friend(new_user, SUPER_ADMIN)
+    add_friend(SUPER_ADMIN, new_user)
+    print(f"✅ 用户 '{new_user}' 已自动添加超级管理员 '{SUPER_ADMIN}' 为好友。")
+
+# ----------------- 新增 API：发送验证码 -----------------
+@app.route('/chat/api/send_verification_code', methods=['POST'])
+def send_verification_code():
+    data = request.json
+    email = data.get('email')
+    username = data.get('username')
+
+    if not email or '@' not in email:
+        return jsonify({"error": "请输入有效邮箱"}), 400
+
+    if username:
+        if user_exists(username):
+            return jsonify({"error": "用户名已存在"}), 409
+        for file in os.listdir(f'{DATA_DIR}/users'):
+            if file.endswith('.json'):
+                with open(f'{DATA_DIR}/users/{file}', encoding='utf-8') as f:
+                    user_data = json.load(f)
+                    if user_data.get('email') == email:
+                        return jsonify({"error": "该邮箱已被注册"}), 409
+
+    code = str(random.randint(100000, 999999))
+    expires = time.time() + 300
+
+    VERIFICATION_CODES[email] = {
+        'code': code,
+        'expires': expires,
+        'username': username
+    }
+
+    if send_verification_email(email, code):
+        return jsonify({"ok": True})
+    else:
+        return jsonify({"error": "邮件发送失败，请检查邮箱或稍后重试"}), 500
+
+@app.route('/chat/api/verify_and_register', methods=['POST'])
+def verify_and_register():
+    data = request.json
+    email = data.get('email')
+    code = data.get('code')
+    username = data.get('username')
+    password = data.get('password')
+
+    if not all([email, code, username, password]):
+        return jsonify({"error": "参数缺失"}), 400
+
+    record = VERIFICATION_CODES.get(email)
+    if not record:
+        return jsonify({"error": "验证码已过期或未发送"}), 400
+    if time.time() > record['expires']:
+        VERIFICATION_CODES.pop(email, None)
+        return jsonify({"error": "验证码已过期"}), 400
+    if record['code'] != code:
+        return jsonify({"error": "验证码错误"}), 400
+    if record.get('username') != username:
+        return jsonify({"error": "用户名不匹配"}), 400
+
+    save_user(username, password, email)
+    VERIFICATION_CODES.pop(email, None)
+
+    # ✅ 自动添加超级管理员为好友
+    auto_add_super_admin_as_friend(username)
+
+    return jsonify({"ok": True})
+
+@app.route('/chat/api/request_password_reset', methods=['POST'])
+def request_password_reset():
+    data = request.json
+    username = data.get('username')
+
+    if not username:
+        return jsonify({"error": "请输入用户名"}), 400
+
+    user = get_user(username)
+    if not user or not user.get('email'):
+        return jsonify({"error": "该用户不存在或未绑定邮箱"}), 404
+
+    email = user['email']
+    code = str(random.randint(100000, 999999))
+    expires = time.time() + 300
+
+    VERIFICATION_CODES[email] = {
+        'code': code,
+        'expires': expires,
+        'username': username
+    }
+
+    if send_verification_email(email, code):
+        return jsonify({"ok": True})
+    else:
+        return jsonify({"error": "邮件发送失败"}), 500
+
+# 新增：通过邮箱请求重置密码
+@app.route('/chat/api/request_password_reset_by_email', methods=['POST'])
+def request_password_reset_by_email():
+    data = request.json
+    email = data.get('email')
+
+    if not email or '@' not in email:
+        return jsonify({"error": "请输入有效邮箱"}), 400
+
+    user = find_user_by_email(email)
+    if not user:
+        return jsonify({"error": "该邮箱未注册或未绑定用户"}), 404
+
+    username = user['username']
+    code = str(random.randint(100000, 999999))
+    expires = time.time() + 300
+
+    VERIFICATION_CODES[email] = {
+        'code': code,
+        'expires': expires,
+        'username': username
+    }
+
+    if send_verification_email(email, code):
+        return jsonify({"ok": True})
+    else:
+        return jsonify({"error": "邮件发送失败"}), 500
+
+@app.route('/chat/api/reset_password', methods=['POST'])
+def reset_password():
+    data = request.json
+    email = data.get('email')
+    code = data.get('code')
+    new_password = data.get('new_password')
+
+    if not all([email, code, new_password]):
+        return jsonify({"error": "参数缺失"}), 400
+
+    record = VERIFICATION_CODES.get(email)
+    if not record:
+        return jsonify({"error": "验证码无效"}), 400
+    if time.time() > record['expires']:
+        VERIFICATION_CODES.pop(email, None)
+        return jsonify({"error": "验证码已过期"}), 400
+    if record['code'] != code:
+        return jsonify({"error": "验证码错误"}), 400
+
+    username = record['username']
+    user = get_user(username)
+    if not user:
+        return jsonify({"error": "用户不存在"}), 404
+
+    user['password'] = new_password
+    with open(f'{DATA_DIR}/users/{username}.json', 'w', encoding='utf-8') as f:
+        json.dump(user, f, ensure_ascii=False, indent=2)
+
+    VERIFICATION_CODES.pop(email, None)
+    return jsonify({"ok": True})
+
+# ----------------- 修复：unread_counts -----------------
+@app.route('/chat/api/unread_counts/<username>')
+def unread_counts(username):
+    if not user_exists(username):
+        return jsonify({}), 404
+    friends = get_friends(username)
+    unread = {}
+    for friend in friends:
+        last_read = get_last_read_time(username, friend)
+        messages = get_messages(username, friend)
+        count = 0
+        for msg in messages:
+            msg_time = msg.get('time', "")
+            if not last_read or (isinstance(msg_time, str) and msg_time > last_read):
+                count += 1
+        if count > 0:
+            unread[friend] = count
+    return jsonify(unread)
+
+@app.route('/chat/api/mark_read', methods=['POST'])
+def mark_read():
+    data = request.json
+    sender = data.get('from')
+    receiver = data.get('to')
+    if not sender or not receiver:
+        return jsonify({"ok": False, "error": "缺少 from 或 to"}), 400
+    mark_chat_as_read(receiver, sender)
+    return jsonify({"ok": True})
+
+def mark_chat_as_read(user, friend):
+    from datetime import datetime
+    now = datetime.utcnow().isoformat() + 'Z'
+    with open(f'{DATA_DIR}/last_read/{user}_{friend}.txt', 'w') as f:
+        f.write(now)
+
+@app.route('/chat/api/unread_friend_requests/<username>')
+def unread_friend_requests(username):
+    reqs = get_friend_requests(username)
+    return jsonify({"count": len(reqs)})
+
+@app.route('/chat/api/messages/<user1>/<user2>')
+def get_chat(user1, user2):
+    mark_chat_as_read(user1, user2)
+    return jsonify(get_messages(user1, user2))
+
+@app.route('/chat/api/check_user_email', methods=['POST'])
+def check_user_email():
+    data = request.json
+    username = data.get('username')
+    user = get_user(username)
+    if user and user.get('email'):
+        return jsonify({"email": user['email']})
+    return jsonify({"error": "用户不存在或未绑定邮箱"}), 404
+
+# ----------------- 修改：支持邮箱登录 -----------------
+@app.route('/chat/api/login', methods=['POST'])
+def login():
+    data = request.json
+    username_input = data.get('username')
+    password = data.get('password')
+    email_input = data.get('email')
+
+    # 优先尝试用户名登录
+    if username_input:
+        user = get_user(username_input)
+        if user and user['password'] == password:
+            return jsonify({"ok": True, "username": user['username']})
+
+    # 如果用户名登录失败，且提供了邮箱，则尝试邮箱登录
+    if email_input:
+        user = find_user_by_email(email_input)
+        if user and user['password'] == password:
+            return jsonify({"ok": True, "username": user['username']})
+
+    return jsonify({"error": "用户名/邮箱或密码错误"}), 401
+
+@app.route('/chat/api/friends/<username>')
+def friends_list(username):
+    return jsonify(get_friends(username))
+
+@app.route('/chat/api/add_friend_request', methods=['POST'])
+def add_friend_request():
+    data = request.json
+    sender = data['sender']
+    target_input = data['target']  # 可能是用户名，也可能是邮箱
+
+    if sender == target_input:
+        return jsonify({"error": "不能添加自己为好友"}), 400
+
+    # 判断 target_input 是邮箱还是用户名
+    target_username = None
+    if '@' in target_input and '.' in target_input:
+        # 尝试按邮箱查找用户
+        for file in os.listdir(f'{DATA_DIR}/users'):
+            if file.endswith('.json'):
+                with open(f'{DATA_DIR}/users/{file}', encoding='utf-8') as f:
+                    user_data = json.load(f)
+                    if user_data.get('email') == target_input:
+                        target_username = user_data['username']
+                        break
+        if target_username is None:
+            return jsonify({"error": "该邮箱未注册"}), 404
+    else:
+        # 按用户名处理
+        target_username = target_input
+        if not user_exists(target_username):
+            return jsonify({"error": "用户不存在"}), 404
+
+    # 后续逻辑统一使用 target_username
+    if target_username in get_friends(sender):
+        return jsonify({"error": "你们已是好友"}), 409
+
+    reqs = get_friend_requests(target_username)
+    if sender in reqs:
+        return jsonify({"error": "已发送过好友请求"}), 409
+
+    save_friend_request(sender, target_username)
+    return jsonify({"ok": True})
+
+@app.route('/chat/api/friend_requests/<username>')
+def friend_requests(username):
+    reqs = get_friend_requests(username)
+    return jsonify(reqs)
+
+@app.route('/chat/api/accept_friend', methods=['POST'])
+def accept_friend():
+    data = request.json
+    user = data['user']
+    friend = data['friend']
+    if friend not in get_friend_requests(user):
+        return jsonify({"error": "无此好友请求"}), 400
+    add_friend(user, friend)
+    add_friend(friend, user)
+    remove_friend_request(friend, user)
+    return jsonify({"ok": True})
+
+@app.route('/chat/api/reject_friend', methods=['POST'])
+def reject_friend():
+    data = request.json
+    user = data['user']
+    friend = data['friend']
+    remove_friend_request(friend, user)
+    return jsonify({"ok": True})
+
+@app.route('/chat/api/send_file', methods=['POST'])
+def send_file():
+    if 'file' not in request.files:
+        return jsonify({"error": "未选择文件"}), 400
+
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({"error": "文件名为空"}), 400
+
+    # 允许的扩展名
+    allowed_extensions = {'txt', 'pdf', 'doc', 'docx', 'jpg', 'jpeg', 'png', 'gif', 'mp4', 'avi', 'mov', 'zip', 'rar', 'mp3', 'wav'}
+    ext = os.path.splitext(file.filename)[1].lower()[1:]
+    if ext not in allowed_extensions:
+        return jsonify({"error": "不支持的文件类型"}), 400
+
+    # 文件大小检查（2GB）
+    max_size = 2 * 1024 * 1024 * 1024
+    if file.content_length > max_size:
+        return jsonify({"error": "文件太大，最大支持 2GB"}), 400
+
+    # 防止路径遍历
+    if '..' in file.filename or '/' in file.filename:
+        return jsonify({"error": "非法文件名"}), 400
+
+    # 生成唯一文件名
+    filename = str(uuid.uuid4()) + '.' + ext
+    filepath = os.path.join(DATA_DIR, 'uploads', filename)
+
+    try:
+        file.save(filepath)
+        # 返回原始文件名和上传后的 UUID 路径
+        original_filename = file.filename
+        return jsonify({
+            "ok": True,
+            "url": f"/chat/uploads/{filename}",
+            "original_name": original_filename
+        })
+    except Exception as e:
+        print(f"[ERROR] 文件保存失败: {e}")
+        return jsonify({"error": "服务器保存失败，请稍后重试"}), 500
+
+@app.route('/chat/uploads/<filename>')
+def uploaded_file(filename):
+    if '..' in filename or filename.startswith('/'):
+        return "非法文件名", 400
+    return send_from_directory(os.path.join(DATA_DIR, 'uploads'), filename)
+
+@app.route('/chat/api/send_message', methods=['POST'])
+def send_message():
+    data = request.json
+    sender = data.get('from')
+    receiver = data.get('to')
+    content = data.get('text')
+    if not sender or not receiver or content is None:
+        return jsonify({"error": "缺少必要字段"}), 400
+    save_message(sender, receiver, content)
+    return jsonify({"ok": True})
+
+@app.route('/chat/api/check_username_exists/<username>')
+def check_username_exists(username):
+    exists = user_exists(username)
+    return jsonify({"exists": exists})
+
+@app.route('/chat/api/change_password', methods=['POST'])
+def change_password():
+    data = request.json
+    username = data.get('username')
+    old_password = data.get('old_password')
+    new_password = data.get('new_password')
+    if not username or not old_password or not new_password:
+        return jsonify({"ok": False, "error": "参数缺失"}), 400
+    success, msg = change_user_password(username, old_password, new_password)
+    if success:
+        return jsonify({"ok": True})
+    else:
+        return jsonify({"ok": False, "error": msg})
+
+@app.route('/chat/api/change_username', methods=['POST'])
+def change_username():
+    data = request.json
+    old_username = data.get('old_username')
+    new_username = data.get('new_username')
+    if not old_username or not new_username:
+        return jsonify({"ok": False, "error": "参数缺失"}), 400
+    success, msg = change_user_username(old_username, new_username)
+    if success:
+        return jsonify({"ok": True})
+    else:
+        return jsonify({"ok": False, "error": msg})
+
+@app.route('/chat/api/delete_account', methods=['POST'])
+def delete_account():
+    data = request.json
+    username = data.get('username')
+    password = data.get('password')
+
+    user = get_user(username)
+    if not user:
+        return jsonify({"ok": False, "error": "用户不存在"}), 404
+    if user['password'] != password:
+        return jsonify({"ok": False, "error": "密码错误"}), 401
+
+    delete_user_completely(username)
+    return jsonify({"ok": True})
+
+@app.route('/chat/api/user_info/<username>')
+def user_info(username):
+    user = get_user(username)
+    if not user:
+        return jsonify({"error": "用户不存在"}), 404
+    return jsonify({
+        "username": user["username"],
+        "email": user.get("email", "")
+    })
+
+@app.route('/chat/')
+def index():
+    return redirect('/chat/login', code=302)
+
+@app.route('/chat/login')
+def login_page():
+    return send_from_directory('static', 'login.html')
+
+@app.route('/chat/register')
+def register_page():
+    return send_from_directory('static', 'register.html')
+
+@app.route('/chat/contacts')
+def contacts_page():
+    return send_from_directory('static', 'contacts.html')
+
+@app.route('/chat/chat_list')
+def chat_list_page():
+    return send_from_directory('static', 'chat_list.html')
+
+@app.route('/chat/discover')
+def discover_page():
+    return send_from_directory('static', 'discover.html')
+
+@app.route('/chat/chat')
+def chat_page():
+    friend = request.args.get('with')
+    if not friend:
+        return redirect('/chat/contacts', code=302)
+    return send_from_directory('static', 'chat.html')
+
+@app.route('/chat/<path:path>')
+def static_files(path):
+    return send_from_directory('static', path)
+
+@app.route('/')
+def root_redirect():
+    return redirect('/chat/login', code=302)
+
+# ----------------- 辅助函数 -----------------
+def get_friends(username):
+    path = f'{DATA_DIR}/friends/{username}.json'
+    if os.path.exists(path):
+        with open(path, encoding='utf-8') as f:
+            data = json.load(f)
+            return [f for f in data if user_exists(f)]
+    return []
+
+def get_last_read_time(user, friend):
+    path = f'{DATA_DIR}/last_read/{user}_{friend}.txt'
+    if os.path.exists(path):
+        with open(path, 'r') as f:
+            return f.read().strip()
+    return None
+
+def get_messages(user1, user2):
+    path = f'{DATA_DIR}/messages/{user1}_{user2}.json'
+    if not os.path.exists(path):
+        return []
+    with open(path, encoding='utf-8') as f:
+        return json.load(f)
+
+def save_message(sender, receiver, content):
+    from datetime import datetime
+    msg = {
+        "from": sender,
+        "text": content,
+        "time": datetime.utcnow().isoformat() + 'Z'
+    }
+    for pair in [(sender, receiver), (receiver, sender)]:
+        path = f'{DATA_DIR}/messages/{pair[0]}_{pair[1]}.json'
+        msgs = []
+        if os.path.exists(path):
+            with open(path, encoding='utf-8') as f:
+                msgs = json.load(f)
+        msgs.append(msg)
+        with open(path, 'w', encoding='utf-8') as f:
+            json.dump(msgs, f, ensure_ascii=False, indent=2)
+
+def save_friend_request(sender, target):
+    path = f'{DATA_DIR}/requests/{target}.json'
+    reqs = []
+    if os.path.exists(path):
+        with open(path, encoding='utf-8') as f:
+            reqs = json.load(f)
+    if sender not in reqs:
+        reqs.append(sender)
+        with open(path, 'w', encoding='utf-8') as f:
+            json.dump(reqs, f, ensure_ascii=False, indent=2)
+
+def get_friend_requests(username):
+    path = f'{DATA_DIR}/requests/{username}.json'
+    if os.path.exists(path):
+        with open(path, encoding='utf-8') as f:
+            reqs = json.load(f)
+            return [r for r in reqs if user_exists(r)]
+    return []
+
+def add_friend(user, friend):
+    friends = get_friends(user)
+    if friend not in friends:
+        friends.append(friend)
+        with open(f'{DATA_DIR}/friends/{user}.json', 'w', encoding='utf-8') as f:
+            json.dump(friends, f, ensure_ascii=False, indent=2)
+
+def remove_friend_request(sender, target):
+    path = f'{DATA_DIR}/requests/{target}.json'
+    if os.path.exists(path):
+        with open(path, encoding='utf-8') as f:
+            reqs = json.load(f)
+        if sender in reqs:
+            reqs.remove(sender)
+            with open(path, 'w', encoding='utf-8') as f:
+                json.dump(reqs, f, ensure_ascii=False, indent=2)
+
+def change_user_password(username, old_password, new_password):
+    user = get_user(username)
+    if not user:
+        return False, "用户不存在"
+    if user['password'] != old_password:
+        return False, "原密码错误"
+    user['password'] = new_password
+    save_user(username, new_password, user.get('email', ''))
+    return True, "修改成功"
+
+def change_user_username(old_username, new_username):
+    if user_exists(new_username):
+        return False, "新用户名已存在"
+    user = get_user(old_username)
+    if not user:
+        return False, "原用户不存在"
+    os.remove(f'{DATA_DIR}/users/{old_username}.json')
+    save_user(new_username, user['password'], user.get('email', ''))
+    return True, "修改成功"
+
+def get_friend_remarks(username):
+    path = f'{REMARKS_DIR}/{username}.json'
+    if os.path.exists(path):
+        with open(path, encoding='utf-8') as f:
+            return json.load(f)
+    return {}
+
+def save_friend_remarks(username, remarks):
+    path = f'{REMARKS_DIR}/{username}.json'
+    try:
+        with open(path, 'w', encoding='utf-8') as f:
+            json.dump(remarks, f, ensure_ascii=False, indent=2)
+        print(f"[INFO] 成功保存备注: {username} -> {remarks}")
+    except Exception as e:
+        print(f"[ERROR] 保存备注失败: {e}")
+        raise
+
+@app.route('/chat/api/set_friend_remark', methods=['POST'])
+def set_friend_remark():
+    try:
+        data = request.json
+        if not data:
+            return jsonify({"error": "请求体为空"}), 400
+
+        user = data.get('user')
+        friend = data.get('friend')
+        remark = data.get('remark', '').strip()
+
+        if not user or not friend:
+            return jsonify({"error": "缺少 user 或 friend"}), 400
+
+        if not user_exists(user) or not user_exists(friend):
+            return jsonify({"error": "用户不存在"}), 404
+
+        if friend not in get_friends(user):
+            return jsonify({"error": "对方不是你的好友"}), 400
+
+        remarks = get_friend_remarks(user)
+        if remark == '':
+            remarks.pop(friend, None)
+        else:
+            remarks[friend] = remark
+
+        save_friend_remarks(user, remarks)
+        return jsonify({"ok": True})
+    except Exception as e:
+        print(f"[ERROR] 设置备注失败: {e}")
+        return jsonify({"error": "服务器内部错误"}), 500
+
+@app.route('/chat/api/friend_remarks/<username>/<friend>')
+def get_friend_remark(username, friend):
+    if not user_exists(username):
+        return jsonify({"error": "用户不存在"}), 404
+    remarks = get_friend_remarks(username)
+    return jsonify({friend: remarks.get(friend, "")})
+
+def delete_user_completely(username):
+    if os.path.exists(f'{DATA_DIR}/users/{username}.json'):
+        os.remove(f'{DATA_DIR}/users/{username}.json')
+    if os.path.exists(f'{DATA_DIR}/friends/{username}.json'):
+        os.remove(f'{DATA_DIR}/friends/{username}.json')
+    if os.path.exists(f'{DATA_DIR}/requests/{username}.json'):
+        os.remove(f'{DATA_DIR}/requests/{username}.json')
+    for f in os.listdir(f'{DATA_DIR}/last_read'):
+        if f.startswith(username + '_') or f.endswith('_' + username + '.txt'):
+            os.remove(os.path.join(f'{DATA_DIR}/last_read', f))
+    for f in os.listdir(f'{DATA_DIR}/messages'):
+        if f.startswith(username + '_') or f.endswith('_' + username + '.json'):
+            os.remove(os.path.join(f'{DATA_DIR}/messages', f))
+    for user_file in os.listdir(f'{DATA_DIR}/friends'):
+        user = user_file.replace('.json', '')
+        friends = get_friends(user)
+        if username in friends:
+            friends.remove(username)
+            with open(f'{DATA_DIR}/friends/{user_file}', 'w', encoding='utf-8') as f:
+                json.dump(friends, f, ensure_ascii=False, indent=2)
+    for req_file in os.listdir(f'{DATA_DIR}/requests'):
+        target = req_file.replace('.json', '')
+        reqs = get_friend_requests(target)
+        if username in reqs:
+            reqs.remove(username)
+            with open(f'{DATA_DIR}/requests/{req_file}', 'w', encoding='utf-8') as f:
+                json.dump(reqs, f, ensure_ascii=False, indent=2)
+
+@app.route('/chat/api/delete_friend', methods=['POST'])
+def delete_friend():
+    try:
+        data = request.json
+        user = data.get('user')
+        friend = data.get('friend')
+
+        if not user or not friend:
+            return jsonify({"error": "缺少 user 或 friend"}), 400
+
+        if not user_exists(user) or not user_exists(friend):
+            return jsonify({"error": "用户不存在"}), 404
+
+        # 检查是否为好友（可选，增强安全性）
+        if friend not in get_friends(user):
+            return jsonify({"error": "对方不是你的好友"}), 400
+
+        # 从 user 的好友列表中移除 friend
+        user_friends = get_friends(user)
+        if friend in user_friends:
+            user_friends.remove(friend)
+            with open(f'{DATA_DIR}/friends/{user}.json', 'w', encoding='utf-8') as f:
+                json.dump(user_friends, f, ensure_ascii=False, indent=2)
+
+        # 从 friend 的好友列表中移除 user
+        friend_friends = get_friends(friend)
+        if user in friend_friends:
+            friend_friends.remove(user)
+            with open(f'{DATA_DIR}/friends/{friend}.json', 'w', encoding='utf-8') as f:
+                json.dump(friend_friends, f, ensure_ascii=False, indent=2)
+
+        return jsonify({"ok": True})
+
+    except Exception as e:
+        print(f"[ERROR] 删除好友失败: {e}")
+        return jsonify({"error": "服务器内部错误"}), 500
+
+# ----------------- 程序启动时确保超级管理员存在 -----------------
+with app.app_context():
+    ensure_super_admin()
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000, debug=False)
