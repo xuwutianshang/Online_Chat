@@ -481,13 +481,13 @@ def save_message(sender, receiver, content):
     key = '_'.join(sorted([sender, receiver]))
     path = f'{DATA_DIR}/messages/{key}.json'
     
-    # ✅ 使用人类可读的时间字符串，格式： "2025-10-17 12:11"
+    # ✅ 格式： "2025-10-17 12:11"
     current_time = time.strftime("%Y-%m-%d %H:%M", time.localtime())
     
     msg = {
         "sender": sender,
         "text": content,
-        "time": current_time  # 字符串格式，人类可读
+        "time": current_time  # 字符串格式
     }
     if os.path.exists(path):
         with open(path, encoding='utf-8') as f:
